@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { generateInitialStudents, DEFAULT_VIOLATIONS } from './constants';
 import { AttendanceState, AttendanceStatus, AttendanceEntry, Student, ViolationOption } from './types';
 import StudentCard from './components/StudentCard';
@@ -9,10 +9,10 @@ import { Search, Calendar, ChevronRight, TrendingUp, Sparkles, UserCheck, Layout
 
 // 기기 고유 ID 생성 (무한 루프 방지용)
 const DEVICE_ID = Math.random().toString(36).substring(7);
-const KVDB_BUCKET = "skp_attendance_v2"; // 고유 버킷 명칭
+const KVDB_BUCKET = "skp_attendance_v3"; // 버킷 버전 업데이트
 
 const App: React.FC = () => {
-  const STORAGE_KEY_PREFIX = 'sg_pro_';
+  const STORAGE_KEY_PREFIX = 'sg_pro_v3_';
   
   const getUrlKey = () => new URLSearchParams(window.location.search).get('key');
 
@@ -29,19 +29,71 @@ const App: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [violations, setViolations] = useState<ViolationOption[]>(DEFAULT_VIOLATIONS);
 
+  // 동기화 제어를 위한 Ref들
+  const lastSyncedAtRef = useRef<number>(0);
+  const isInternalUpdateRef = useRef<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'connected' | 'syncing' | 'error'>('connected');
+
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [password, setPassword] = useState('');
 
-  // 동기화 관련 상태
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number>(0);
-  const isInternalUpdate = useRef(false);
+  // 1. 데이터 클라우드 연동 함수 (useCallback으로 최적화)
+  const syncWithCloud = useCallback(async (action: 'push' | 'pull', data?: any) => {
+    if (!syncKey) return;
+    const url = `https://kvdb.io/AnV9v8pB3vB6g7r9q8zX1/${KVDB_BUCKET}_${syncKey}`;
+    
+    try {
+      if (action === 'push') {
+        setSyncStatus('syncing');
+        const timestamp = Date.now();
+        const payload = {
+          attendance: data.attendance,
+          students: data.students,
+          violations: data.violations,
+          updatedBy: DEVICE_ID,
+          timestamp: timestamp
+        };
+        
+        const response = await fetch(url, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
 
-  // 1. 초기 데이터 로드
+        if (response.ok) {
+          lastSyncedAtRef.current = timestamp;
+          setSyncStatus('connected');
+        }
+      } else {
+        // Pull 시에는 로딩 표시를 너무 자주 띄우지 않음
+        const res = await fetch(url);
+        if (res.ok) {
+          const remoteData = await res.json();
+          
+          // 조건: 내가 보낸 데이터가 아니고 + 서버 데이터가 내가 가진 데이터보다 최신일 때
+          if (remoteData.updatedBy !== DEVICE_ID && remoteData.timestamp > lastSyncedAtRef.current) {
+            console.log("새로운 데이터 발견! 동기화 진행...");
+            isInternalUpdateRef.current = true; // 내부 업데이트임을 표시하여 다시 push되는 것 방지
+            
+            setAttendance(remoteData.attendance);
+            setStudents(remoteData.students);
+            setViolations(remoteData.violations);
+            lastSyncedAtRef.current = remoteData.timestamp;
+            setSyncStatus('connected');
+          }
+        }
+      }
+    } catch (e) {
+      console.error("동기화 오류:", e);
+      setSyncStatus('error');
+    }
+  }, [syncKey]);
+
+  // 2. 초기 로드 및 URL 동기화
   useEffect(() => {
     const urlKey = getUrlKey();
-    if (urlKey) {
+    if (urlKey && urlKey !== syncKey) {
       setSyncKey(urlKey);
       setIsSetup(true);
       localStorage.setItem(STORAGE_KEY_PREFIX + 'last_key', urlKey);
@@ -50,81 +102,50 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!syncKey) return;
-    const loadLocal = () => {
-      const savedAttendance = localStorage.getItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`);
-      const savedStudents = localStorage.getItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`);
-      const savedViolations = localStorage.getItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`);
-      if (savedAttendance) setAttendance(JSON.parse(savedAttendance));
-      if (savedStudents) setStudents(JSON.parse(savedStudents));
-      else setStudents(generateInitialStudents());
-      if (savedViolations) setViolations(JSON.parse(savedViolations));
-    };
-    loadLocal();
-  }, [syncKey]);
-
-  // 2. 실시간 클라우드 동기화 (Push & Pull)
-  const syncWithCloud = async (action: 'push' | 'pull', data?: any) => {
-    if (!syncKey) return;
-    const url = `https://kvdb.io/AnV9v8pB3vB6g7r9q8zX1/${KVDB_BUCKET}_${syncKey}`;
+    const savedAttendance = localStorage.getItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`);
+    const savedStudents = localStorage.getItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`);
+    const savedViolations = localStorage.getItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`);
     
-    try {
-      if (action === 'push') {
-        setIsSyncing(true);
-        const payload = {
-          attendance: data.attendance,
-          students: data.students,
-          violations: data.violations,
-          updatedBy: DEVICE_ID,
-          timestamp: Date.now()
-        };
-        await fetch(url, {
-          method: 'PUT',
-          body: JSON.stringify(payload)
-        });
-        setLastSyncedAt(payload.timestamp);
-      } else {
-        const res = await fetch(url);
-        if (res.ok) {
-          const remoteData = await res.json();
-          // 내가 보낸 것이 아니고, 클라우드 데이터가 더 최신일 때만 업데이트
-          if (remoteData.updatedBy !== DEVICE_ID && remoteData.timestamp > lastSyncedAt) {
-            isInternalUpdate.current = true;
-            setAttendance(remoteData.attendance);
-            setStudents(remoteData.students);
-            setViolations(remoteData.violations);
-            setLastSyncedAt(remoteData.timestamp);
-            console.log("Remote data synced!");
-          }
-        }
-      }
-    } catch (e) {
-      console.error("Sync Error:", e);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+    if (savedAttendance) setAttendance(JSON.parse(savedAttendance));
+    if (savedStudents) setStudents(JSON.parse(savedStudents));
+    else setStudents(generateInitialStudents());
+    if (savedViolations) setViolations(JSON.parse(savedViolations));
 
-  // 실시간 폴링 (3초 간격으로 데이터 가져오기)
+    // 최초 1회 서버에서 최신 데이터 가져오기 시도
+    syncWithCloud('pull');
+  }, [syncKey, syncWithCloud]);
+
+  // 3. 실시간 폴링 (2.5초 간격) - Ref를 사용하여 항상 최신 상태 유지
   useEffect(() => {
     if (!syncKey || !isSetup) return;
-    const interval = setInterval(() => syncWithCloud('pull'), 3000);
+    const interval = setInterval(() => {
+      syncWithCloud('pull');
+    }, 2500);
     return () => clearInterval(interval);
-  }, [syncKey, isSetup, lastSyncedAt]);
+  }, [syncKey, isSetup, syncWithCloud]);
 
-  // 데이터 변경 시 로컬 저장 및 클라우드 전송
+  // 4. 로컬 저장 및 데이터 변경 감지 Push
   useEffect(() => {
-    if (syncKey && isSetup) {
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`, JSON.stringify(attendance));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`, JSON.stringify(students));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`, JSON.stringify(violations));
+    if (!syncKey || !isSetup) return;
 
-      // 내부에서 상태가 변경되었을 때만 클라우드에 푸시 (무한 루프 방지)
-      if (!isInternalUpdate.current) {
-        syncWithCloud('push', { attendance, students, violations });
-      }
-      isInternalUpdate.current = false;
+    // 로컬 스토리지 저장
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`, JSON.stringify(attendance));
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`, JSON.stringify(students));
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`, JSON.stringify(violations));
+
+    // 외부(다른 기기)에서 가져온 데이터로 인한 변경이면 서버에 다시 보내지 않음
+    if (isInternalUpdateRef.current) {
+      isInternalUpdateRef.current = false;
+      return;
     }
-  }, [attendance, students, violations]);
+
+    // 사용자가 직접 변경한 경우 0.5초 뒤 서버로 전송 (디바운스)
+    const timeout = setTimeout(() => {
+      syncWithCloud('push', { attendance, students, violations });
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [attendance, students, violations, syncKey, isSetup, syncWithCloud]);
 
   const stats = useMemo(() => {
     const currentDayRecords = attendance[selectedDate] || {};
@@ -156,10 +177,12 @@ const App: React.FC = () => {
   };
 
   const handleStart = (key: string) => {
-    setSyncKey(key);
+    const cleanKey = key.trim().toLowerCase();
+    if (!cleanKey) return;
+    setSyncKey(cleanKey);
     setIsSetup(true);
-    localStorage.setItem(STORAGE_KEY_PREFIX + 'last_key', key);
-    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?key=' + key;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'last_key', cleanKey);
+    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?key=' + cleanKey;
     window.history.pushState({ path: newUrl }, '', newUrl);
   };
 
@@ -178,11 +201,11 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-3xl font-black text-white tracking-tight leading-tight">석포여자중학교<br/>지각관리시스템</h1>
-            <p className="text-slate-400 mt-3 font-medium">스마트 학생 지도 및 실시간 동기화</p>
+            <p className="text-slate-400 mt-3 font-medium">실시간 동기화 및 스마트 지각 관리</p>
           </div>
           <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-6">
             <div className="space-y-2">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">학교 동기화 키 생성</label>
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">학교 고유 동기화 키 생성</label>
               <input 
                 type="text" 
                 placeholder="예: seokpo-girls"
@@ -199,7 +222,12 @@ const App: React.FC = () => {
             >
               시작하기 <ArrowRight className="group-hover:translate-x-1 transition-transform" />
             </button>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Created by 김용섭</p>
+            <div className="pt-4 border-t border-white/5">
+              <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
+                * 동일한 키를 입력한 모든 기기는 실시간으로 연동됩니다.<br/>
+                * PC에서 설정한 학생 명단이 아이폰에 즉시 반영됩니다.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -217,19 +245,19 @@ const App: React.FC = () => {
                   <UserCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-black text-slate-900 tracking-tight leading-none">석포여중 지각관리시스템</h1>
+                  <h1 className="text-lg font-black text-slate-900 tracking-tight leading-none">석포여중 지각관리</h1>
                   <div className="flex items-center gap-2 mt-1.5">
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse-soft"></div>
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{syncKey}</span>
-                    </div>
-                    <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-full border border-slate-200">
-                      {isSyncing ? (
+                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-colors ${syncStatus === 'error' ? 'bg-red-50 border-red-200' : 'bg-slate-100 border-slate-200'}`}>
+                      {syncStatus === 'syncing' ? (
                         <RefreshCw size={10} className="text-pink-500 animate-spin" />
+                      ) : syncStatus === 'error' ? (
+                        <WifiOff size={10} className="text-red-500" />
                       ) : (
-                        <Cloud size={10} className="text-blue-400" />
+                        <Wifi size={10} className="text-green-500" />
                       )}
-                      <span className="text-[8px] font-black text-slate-500 uppercase">{isSyncing ? 'Syncing...' : 'Connected'}</span>
+                      <span className="text-[8px] font-black text-slate-500 uppercase">
+                        {syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'error' ? 'Offline' : syncKey}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -259,7 +287,7 @@ const App: React.FC = () => {
                 <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input 
                   type="text" 
-                  placeholder="학생 통합 검색..."
+                  placeholder="학생 이름 또는 학번 검색..."
                   className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-3 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all shadow-sm"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -303,11 +331,11 @@ const App: React.FC = () => {
                   onClick={() => {
                     const url = window.location.href;
                     navigator.clipboard.writeText(url);
-                    alert("동기화 링크가 복사되었습니다! 아이폰으로 보내세요.");
+                    alert("동기화 링크가 복사되었습니다! 아이폰 브라우저에 주소를 붙여넣으세요.");
                   }}
                   className="flex items-center gap-2 text-[11px] font-black text-pink-400 hover:text-pink-300 transition-colors"
                 >
-                  <Share2 size={14} /> 모바일 링크 복사
+                  <Share2 size={14} /> 기기 연결 링크 복사
                 </button>
             </div>
           </div>
@@ -335,7 +363,7 @@ const App: React.FC = () => {
                 <div className="flex flex-col md:flex-row md:items-center gap-4">
                   <div className="flex items-center gap-2 shrink-0">
                     <Info size={18} className="text-slate-400" />
-                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">성찰문 지도 가이드</span>
+                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">성찰문 지도 상태 가이드</span>
                   </div>
                   <div className="h-px md:h-4 md:w-px bg-slate-200"></div>
                   <div className="flex flex-wrap items-center gap-4 md:gap-8">
@@ -343,15 +371,15 @@ const App: React.FC = () => {
                       <div className="w-8 h-8 rounded-lg bg-white border-2 border-slate-100 flex items-center justify-center text-slate-200">
                         <Check size={14} />
                       </div>
-                      <span className="text-xs font-bold text-slate-500">미부여</span>
+                      <span className="text-xs font-bold text-slate-500">미배부</span>
                     </div>
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-lg bg-orange-400 border-2 border-orange-400 flex items-center justify-center text-white animate-pulse-soft">
                         <AlertCircle size={14} />
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-xs font-black text-slate-800">부여됨 (지도 중)</span>
-                        <span className="text-[9px] font-bold text-slate-400 mt-0.5">학생에게 배부한 상태</span>
+                        <span className="text-xs font-black text-slate-800">배부 완료</span>
+                        <span className="text-[9px] font-bold text-slate-400 mt-0.5">지도 중인 학생</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2.5">
@@ -359,8 +387,8 @@ const App: React.FC = () => {
                         <CheckCircle2 size={14} />
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-xs font-black text-slate-800">확인 완료</span>
-                        <span className="text-[9px] font-bold text-slate-400 mt-0.5">회수 및 지도 종료</span>
+                        <span className="text-xs font-black text-slate-800">회수 완료</span>
+                        <span className="text-[9px] font-bold text-slate-400 mt-0.5">최종 확인됨</span>
                       </div>
                     </div>
                   </div>
@@ -384,7 +412,7 @@ const App: React.FC = () => {
                       </div>
                       <div className="relative text-left md:text-center">
                         <h3 className={`text-2xl md:text-3xl font-black text-slate-900 ${theme.text} transition-colors`}>{year}학년</h3>
-                        <p className="text-xs md:text-sm font-bold text-slate-400 mt-1 md:mt-2">명단 확인하기</p>
+                        <p className="text-xs md:text-sm font-bold text-slate-400 mt-1 md:mt-2">반 선택으로 이동</p>
                       </div>
                     </button>
                   );
@@ -395,16 +423,16 @@ const App: React.FC = () => {
             {!searchQuery && currentYear !== null && currentClass === null && (
               <div className="space-y-6 flex-1">
                 <button onClick={() => setCurrentYear(null)} className="flex items-center gap-2 text-slate-400 font-black hover:text-pink-600 transition-colors text-sm">
-                  <ChevronLeft size={20} /> 학년 선택
+                  <ChevronLeft size={20} /> 학년 다시 선택
                 </button>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[1, 2, 3, 4].map(cls => (
                     <button 
                       key={cls}
                       onClick={() => setCurrentClass(cls)}
-                      className="bg-white border border-slate-200 p-8 rounded-3xl hover:border-pink-500 hover:shadow-xl transition-all flex flex-col items-center gap-4"
+                      className="bg-white border border-slate-200 p-8 rounded-3xl hover:border-pink-500 hover:shadow-xl transition-all flex flex-col items-center gap-4 group"
                     >
-                      <div className="bg-slate-50 p-4 rounded-2xl text-slate-400">
+                      <div className="bg-slate-50 p-4 rounded-2xl text-slate-400 group-hover:bg-pink-50 group-hover:text-pink-500 transition-colors">
                         <Users size={32} />
                       </div>
                       <h3 className="text-xl font-black text-slate-900">{cls}반</h3>
@@ -418,7 +446,7 @@ const App: React.FC = () => {
               <div className="space-y-6 flex-1">
                 {!searchQuery && (
                   <button onClick={() => setCurrentClass(null)} className="flex items-center gap-2 text-slate-400 font-black hover:text-pink-600 transition-colors text-sm">
-                    <ChevronLeft size={20} /> 반 선택
+                    <ChevronLeft size={20} /> 반 다시 선택
                   </button>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -432,6 +460,12 @@ const App: React.FC = () => {
                     />
                   ))}
                 </div>
+                {filteredStudents.length === 0 && (
+                  <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-400">
+                    <Search size={48} className="mb-4 opacity-10" />
+                    <p className="font-bold">검색 결과가 없습니다.</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
