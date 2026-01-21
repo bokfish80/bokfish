@@ -5,24 +5,24 @@ import { AttendanceState, AttendanceStatus, AttendanceEntry, Student, ViolationO
 import StudentCard from './components/StudentCard';
 import StatsDashboard from './components/StatsDashboard';
 import AdminPanel from './components/AdminPanel';
-import { Search, Calendar, TrendingUp, UserCheck, LayoutGrid, GraduationCap, ChevronLeft, Lock, Unlock, ArrowRight, Heart, Wifi, WifiOff, RefreshCw, Smartphone, Save, ShieldCheck, Settings } from 'lucide-react';
+import { Search, Calendar, TrendingUp, UserCheck, LayoutGrid, GraduationCap, ChevronLeft, Lock, Unlock, ArrowRight, Heart, Wifi, WifiOff, RefreshCw, Smartphone, Save, ShieldCheck, Settings, Loader2 } from 'lucide-react';
 
-// 기기 ID 고정 (로컬 저장소 활용)
-const getDeviceId = () => {
-  let id = localStorage.getItem('sg_device_id');
+// 1. 기기 ID 고정 (절대 새로고침으로 변하지 않음)
+const getPersistentDeviceId = () => {
+  let id = localStorage.getItem('seokpo_device_id_v5');
   if (!id) {
-    id = Math.random().toString(36).substring(7);
-    localStorage.setItem('sg_device_id', id);
+    id = 'dev_' + Math.random().toString(36).substring(2, 11);
+    localStorage.setItem('seokpo_device_id_v5', id);
   }
   return id;
 };
 
-const DEVICE_ID = getDeviceId();
+const DEVICE_ID = getPersistentDeviceId();
 const BUCKET_ID = "AnV9v8pB3vB6g7r9q8zX1";
-const BASE_KEY = "seokpo_v5_master"; 
+const BASE_KEY = "seokpo_v6_final"; 
 
 const App: React.FC = () => {
-  const STORAGE_KEY_PREFIX = 'sg_pro_v5_';
+  const STORAGE_KEY_PREFIX = 'sg_pro_v6_';
   
   const [authCode, setAuthCode] = useState<string>(() => localStorage.getItem(STORAGE_KEY_PREFIX + 'auth') || '');
   const [isSetup, setIsSetup] = useState<boolean>(authCode === '1111');
@@ -37,22 +37,23 @@ const App: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [violations, setViolations] = useState<ViolationOption[]>(DEFAULT_VIOLATIONS);
 
-  // 동기화 제어 핵심 변수
+  // --- 동기화 제어 시스템 ---
   const lastUpdateAtRef = useRef<number>(0);
   const isPullingRef = useRef<boolean>(false);
-  const isInitialPullDone = useRef<boolean>(false); 
+  const isPushingRef = useRef<boolean>(false);
+  const [isAppReady, setIsAppReady] = useState<boolean>(false); // 초기 동기화 완료 여부
   const [syncStatus, setSyncStatus] = useState<'connected' | 'syncing' | 'error' | 'idle'>('idle');
   const [lastSyncTime, setLastSyncTime] = useState<string>('');
-  const [isDataDirty, setIsDataDirty] = useState(false); // 실제 변경 사항이 있을 때만 true
+  const [isDataDirty, setIsDataDirty] = useState(false); // 오직 사용자 액션시에만 true
 
   const syncKey = useMemo(() => isSetup ? `${BASE_KEY}_${authCode}` : '', [isSetup, authCode]);
 
-  // 클라우드에서 데이터 가져오기 (Pull)
-  const fetchFromCloud = useCallback(async (isManual = false) => {
-    if (!syncKey || isPullingRef.current) return;
+  // 클라우드 데이터 가져오기 (Pull)
+  const fetchFromCloud = useCallback(async (isInitial = false) => {
+    if (!syncKey || isPullingRef.current || isPushingRef.current) return;
     
     isPullingRef.current = true;
-    if (isManual) setSyncStatus('syncing');
+    setSyncStatus('syncing');
     
     try {
       const res = await fetch(`https://kvdb.io/${BUCKET_ID}/${syncKey}`);
@@ -60,34 +61,36 @@ const App: React.FC = () => {
         const text = await res.text();
         if (text && text !== "null") {
           const data = JSON.parse(text);
-          // 서버 데이터가 내 현재 데이터보다 최신인 경우에만 업데이트
-          if (data && data.timestamp > lastUpdateAtRef.current) {
+          // 서버 데이터가 더 최신이거나 기기가 다른 경우 동기화
+          if (data && (data.timestamp > lastUpdateAtRef.current || data.updatedBy !== DEVICE_ID)) {
             setAttendance(data.attendance || {});
             setStudents(data.students || []);
             setViolations(data.violations || DEFAULT_VIOLATIONS);
             lastUpdateAtRef.current = data.timestamp;
             setLastSyncTime(new Date().toLocaleTimeString());
-            setSyncStatus('connected');
-            setIsDataDirty(false); // 방금 가져온 데이터이므로 dirty 아님
+            setIsDataDirty(false); // 서버 데이터를 받았으므로 Dirty 아님
           }
         }
       }
-      isInitialPullDone.current = true; // 서버 확인 완료됨을 표시
-      if (isManual) setSyncStatus('connected');
+      setSyncStatus('connected');
+      if (isInitial) setIsAppReady(true);
     } catch (e) {
-      if (isManual) setSyncStatus('error');
+      setSyncStatus('error');
+      if (isInitial) setIsAppReady(true); // 에러나도 일단 앱은 시작
     } finally {
       isPullingRef.current = false;
     }
   }, [syncKey]);
 
-  // 클라우드로 데이터 전송 (Push)
+  // 클라우드 데이터 저장 (Push)
   const pushToCloud = useCallback(async (force = false) => {
-    // 첫 Pull이 끝나지 않았거나, 현재 Pull 중이거나, 변경사항이 없으면(dirty 아님) Push 방지
-    if (!syncKey || !isInitialPullDone.current || isPullingRef.current) return;
+    // 앱 초기화 전이거나, 현재 작업 중이면 중단
+    if (!syncKey || !isAppReady || isPullingRef.current || isPushingRef.current) return;
     if (!isDataDirty && !force) return;
 
+    isPushingRef.current = true;
     setSyncStatus('syncing');
+    
     try {
       const timestamp = Date.now();
       const payload = { 
@@ -109,20 +112,21 @@ const App: React.FC = () => {
         setLastSyncTime(new Date().toLocaleTimeString());
         setSyncStatus('connected');
         setIsDataDirty(false);
-        if (force) alert("클라우드에 안전하게 저장되었습니다.");
       } else {
         setSyncStatus('error');
       }
     } catch (e) {
       setSyncStatus('error');
+    } finally {
+      isPushingRef.current = false;
     }
-  }, [syncKey, attendance, students, violations, isDataDirty]);
+  }, [syncKey, isAppReady, attendance, students, violations, isDataDirty]);
 
-  // 1. 앱 초기 구동
+  // 초기 로그인 완료 시 부팅 로직
   useEffect(() => {
     if (!isSetup) return;
     
-    // 로컬 데이터 우선 로드
+    // 1. 일단 로컬 데이터 로드
     const savedAttr = localStorage.getItem(`${STORAGE_KEY_PREFIX}attr`);
     const savedStds = localStorage.getItem(`${STORAGE_KEY_PREFIX}std`);
     if (savedAttr) setAttendance(JSON.parse(savedAttr));
@@ -134,34 +138,30 @@ const App: React.FC = () => {
       setStudents(generateInitialStudents());
     }
 
-    // 서버 데이터 즉시 확인
+    // 2. 서버 데이터 필수 확인 (Pull이 끝나야 Push 허용됨)
     fetchFromCloud(true);
-  }, [isSetup, fetchFromCloud]);
+  }, [isSetup]);
 
-  // 2. 주기적인 서버 체크 (8초 마다)
+  // 주기적 서버 체크 (6초)
   useEffect(() => {
-    if (!isSetup) return;
-    const interval = setInterval(() => fetchFromCloud(false), 8000);
+    if (!isSetup || !isAppReady) return;
+    const interval = setInterval(() => fetchFromCloud(false), 6000);
     return () => clearInterval(interval);
-  }, [isSetup, fetchFromCloud]);
+  }, [isSetup, isAppReady, fetchFromCloud]);
 
-  // 3. 데이터 변경 감지 및 자동 저장
+  // 데이터 변경 시 로컬 저장 및 예약 전송
   useEffect(() => {
-    if (!isSetup || !isInitialPullDone.current) return;
+    if (!isSetup || !isAppReady) return;
     
-    // 로컬 저장
     localStorage.setItem(`${STORAGE_KEY_PREFIX}attr`, JSON.stringify(attendance));
     localStorage.setItem(`${STORAGE_KEY_PREFIX}std`, JSON.stringify(students));
     localStorage.setItem(`${STORAGE_KEY_PREFIX}vio`, JSON.stringify(violations));
 
-    // 수정 사항이 생겼을 때만 Push 타이머 가동
     if (isDataDirty) {
-      const timer = setTimeout(() => {
-        pushToCloud(false);
-      }, 3000);
+      const timer = setTimeout(() => pushToCloud(false), 2500);
       return () => clearTimeout(timer);
     }
-  }, [attendance, students, violations, isSetup, pushToCloud, isDataDirty]);
+  }, [attendance, students, violations, isSetup, isAppReady, pushToCloud, isDataDirty]);
 
   const stats = useMemo(() => {
     const currentDayRecords = attendance[selectedDate] || {};
@@ -179,9 +179,8 @@ const App: React.FC = () => {
     });
   }, [searchQuery, currentYear, currentClass, students]);
 
-  // 상태 업데이트 함수 - 여기서 dirty 플래그를 세움
   const updateStatus = (status: AttendanceStatus | null, studentId: string, options?: Partial<AttendanceEntry>) => {
-    setIsDataDirty(true);
+    setIsDataDirty(true); // 사용자 조작 발생 알림
     setAttendance(prev => {
       const newDayRecords = { ...(prev[selectedDate] || {}) };
       if (status === null) delete newDayRecords[studentId];
@@ -201,12 +200,24 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-    if (confirm('시스템에서 로그아웃 하시겠습니까?')) {
+    if (confirm('시스템에서 로그아웃 하시겠습니까? 데이터는 클라우드에 보존됩니다.')) {
       localStorage.removeItem(STORAGE_KEY_PREFIX + 'auth');
       window.location.reload();
     }
   };
 
+  // 초기 접속 잠금 화면
+  if (isSetup && !isAppReady) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+        <Loader2 size={48} className="text-pink-500 animate-spin mb-6" />
+        <h2 className="text-2xl font-black text-white">클라우드 데이터 연동 중...</h2>
+        <p className="text-slate-500 mt-2 font-bold">다른 기기의 최신 정보를 가져오는 중입니다. 잠시만 기다려주세요.</p>
+      </div>
+    );
+  }
+
+  // 로그인 화면
   if (!isSetup) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
@@ -216,7 +227,7 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-3xl font-black text-white tracking-tight leading-tight">석포여자중학교<br/><span className="text-pink-500">지각관리시스템</span></h1>
-            <p className="text-slate-500 mt-3 font-medium text-sm">암호 "1111"을 입력하여 클라우드에 접속하세요.</p>
+            <p className="text-slate-500 mt-3 font-medium text-sm">암호 "1111"을 입력하여 모든 기기 데이터를 통합하세요.</p>
           </div>
           <div className="bg-slate-900/50 p-10 rounded-[3rem] border border-white/5 space-y-8 shadow-3xl">
             <div className="space-y-3">
@@ -265,7 +276,7 @@ const App: React.FC = () => {
                     <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all ${syncStatus === 'error' ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
                       {syncStatus === 'syncing' ? <RefreshCw size={10} className="text-pink-500 animate-spin" /> : syncStatus === 'error' ? <WifiOff size={10} className="text-orange-500" /> : <Wifi size={10} className="text-green-500" />}
                       <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter">
-                        {syncStatus === 'syncing' ? '데이터 동기화 중...' : syncStatus === 'error' ? '연결 오류' : lastSyncTime ? `${lastSyncTime} 클라우드 연동됨` : '연동 대기'}
+                        {syncStatus === 'syncing' ? '데이터 동기화 중...' : syncStatus === 'error' ? '연결 끊김' : lastSyncTime ? `${lastSyncTime} 통합 연동됨` : '클라우드 연결됨'}
                       </span>
                     </div>
                   </div>
@@ -274,9 +285,10 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => pushToCloud(true)}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-2xl font-black text-xs transition-all shadow-sm ${isDataDirty ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/20' : 'bg-white border border-slate-200 text-slate-400 hover:text-slate-600'}`}
+                  disabled={!isDataDirty && syncStatus !== 'error'}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-2xl font-black text-xs transition-all shadow-sm ${isDataDirty ? 'bg-pink-600 text-white shadow-lg shadow-pink-500/20' : 'bg-white border border-slate-200 text-slate-400 opacity-60'}`}
                 >
-                  <Save size={16} /> <span className="hidden sm:inline">지금 바로 연동</span>
+                  <Save size={16} /> <span className="hidden sm:inline">{isDataDirty ? '지금 변경사항 저장' : '저장 완료'}</span>
                 </button>
                 <button onClick={handleLogout} className="bg-slate-950 text-white p-3.5 rounded-2xl hover:bg-slate-800 transition-all shadow-sm" title="로그아웃"><Unlock size={18} /></button>
               </div>
@@ -313,15 +325,17 @@ const App: React.FC = () => {
       <div className="bg-slate-900 text-white">
         <div className="max-w-7xl mx-auto px-4 md:px-8 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-5">
-            <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">실시간 현황 요약</span>
+            <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">오늘의 요약</span>
             <div className="flex gap-3">
-              <span className="bg-white/10 px-4 py-1.5 rounded-full text-[11px] font-black">정상출석 {stats.present}</span>
+              <span className="bg-white/10 px-4 py-1.5 rounded-full text-[11px] font-black">정상 {stats.present}</span>
               <span className="bg-yellow-400/20 text-yellow-400 px-4 py-1.5 rounded-full text-[11px] font-black">지각 {stats.late}</span>
               <span className="bg-red-500/20 text-red-400 px-4 py-1.5 rounded-full text-[11px] font-black">결석 {stats.absent}</span>
             </div>
           </div>
-          <div className="hidden sm:flex items-center gap-2 text-[10px] font-black text-slate-500 tracking-tighter">
-            <Smartphone size={14} /> 모든 기기에서 1111 암호로 동일 데이터를 공유 중입니다.
+          <div className="hidden sm:flex items-center gap-4">
+            <div className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 tracking-tighter">
+              <Smartphone size={14} /> ID: {DEVICE_ID}
+            </div>
           </div>
         </div>
       </div>
@@ -391,7 +405,7 @@ const App: React.FC = () => {
 
       <footer className="py-10 text-center border-t border-slate-100 bg-white">
          <div className="flex items-center justify-center gap-3 text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">
-           <span>석포여자중학교 지각관리 v5.5 (Safe-Sync)</span>
+           <span>석포여자중학교 지각관리 v6.0 (Perfect-Sync)</span>
            <span className="w-1.5 h-1.5 rounded-full bg-slate-200"></span>
            <span className="flex items-center gap-2">김용섭 제작 <Heart size={12} className="text-pink-500 fill-pink-500" /></span>
          </div>
