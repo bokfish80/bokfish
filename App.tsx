@@ -69,7 +69,6 @@ const App: React.FC = () => {
         
         try {
           const data = JSON.parse(text);
-          // 타 기기에서 온 데이터가 더 최신인 경우만 업데이트
           if (data && data.updatedBy !== DEVICE_ID && data.timestamp > lastUpdateAtRef.current) {
             isUpdatingFromRemote.current = true;
             setAttendance(data.attendance || {});
@@ -84,12 +83,10 @@ const App: React.FC = () => {
             setLastSyncTime(new Date().toLocaleTimeString());
           }
         } catch (parseError) {
-          console.error("Remote JSON parse failed:", parseError);
           if (isManual) setSyncStatus('error');
         }
       }
     } catch (e) {
-      console.warn("Sync fetch failed:", e);
       if (isManual) setSyncStatus('error');
     }
   }, [syncKey, isSetup]);
@@ -119,17 +116,15 @@ const App: React.FC = () => {
         setLastSyncTime(new Date().toLocaleTimeString());
         setSyncStatus('connected');
         setHasUnsavedChanges(false);
-        if (force) alert("데이터가 안전하게 연동되었습니다.");
+        if (force) alert("클라우드 연동이 완료되었습니다.");
       } else {
         setSyncStatus('error');
       }
     } catch (e) {
-      console.error("Push to cloud failed:", e);
       setSyncStatus('error');
     }
   }, [syncKey, isSetup, attendance, students, violations]);
 
-  // 초기 로드
   useEffect(() => {
     if (!syncKey) return;
     try {
@@ -145,16 +140,14 @@ const App: React.FC = () => {
       setStudents(generateInitialStudents());
     }
     fetchFromCloud();
-  }, [syncKey]); // fetchFromCloud 의존성 제거하여 불필요한 호출 방지
+  }, [syncKey]);
 
-  // 배경 폴링 (3초 간격으로 완화하여 서버 부담 줄임)
   useEffect(() => {
     if (!syncKey || !isSetup) return;
-    const interval = setInterval(() => fetchFromCloud(false), 3000);
+    const interval = setInterval(() => fetchFromCloud(false), 5000); // 5초 간격으로 완화
     return () => clearInterval(interval);
   }, [syncKey, isSetup, fetchFromCloud]);
 
-  // 데이터 변경 시 로컬 저장 및 자동 연동 예약
   useEffect(() => {
     if (!syncKey || !isSetup) return;
     
@@ -171,10 +164,10 @@ const App: React.FC = () => {
 
     setHasUnsavedChanges(true);
     
-    // 5초 후 자동 연동 (자주 변경 시 부하 방지)
+    // 10초 후 자동 백업 연동 (주기적)
     const timer = setTimeout(() => { 
       pushToCloud(false); 
-    }, 5000);
+    }, 10000);
     
     return () => clearTimeout(timer);
   }, [attendance, students, violations, syncKey, isSetup, pushToCloud]);
@@ -236,8 +229,8 @@ const App: React.FC = () => {
             <UserCheck size={40} />
           </div>
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight leading-tight">지각관리시스템<br/><span className="text-pink-500 text-xl">Cloud Professional</span></h1>
-            <p className="text-slate-400 mt-3 font-medium text-sm">기기 간 실시간 동기화를 지원합니다.</p>
+            <h1 className="text-3xl font-black text-white tracking-tight leading-tight">지각관리시스템</h1>
+            <p className="text-slate-400 mt-3 font-medium text-sm">기기 간 실시간 동기화를 시작합니다.</p>
           </div>
           <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-6">
             <div className="space-y-2">
@@ -274,9 +267,9 @@ const App: React.FC = () => {
                 <div>
                   <h1 className="text-lg font-black text-slate-900 tracking-tight leading-none">지각관리시스템</h1>
                   <div className="flex items-center gap-2 mt-1.5">
-                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${syncStatus === 'error' ? 'bg-red-50 border-red-200' : 'bg-slate-100 border-slate-200'}`}>
-                      {syncStatus === 'syncing' ? <RefreshCw size={10} className="text-pink-500 animate-spin" /> : syncStatus === 'error' ? <WifiOff size={10} className="text-red-500" /> : <Wifi size={10} className="text-green-500" />}
-                      <span className="text-[8px] font-black text-slate-500 uppercase">{syncStatus === 'syncing' ? '연동중' : syncStatus === 'error' ? '대기' : lastSyncTime || syncKey}</span>
+                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${syncStatus === 'error' ? 'bg-orange-50 border-orange-200' : 'bg-slate-100 border-slate-200'}`}>
+                      {syncStatus === 'syncing' ? <RefreshCw size={10} className="text-pink-500 animate-spin" /> : syncStatus === 'error' ? <WifiOff size={10} className="text-orange-500" /> : <Wifi size={10} className="text-green-500" />}
+                      <span className="text-[8px] font-black text-slate-500 uppercase">{syncStatus === 'syncing' ? '연동중' : syncStatus === 'error' ? '대기' : lastSyncTime || '연동됨'}</span>
                     </div>
                   </div>
                 </div>
@@ -284,7 +277,7 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => pushToCloud(true)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs transition-all shadow-sm ${hasUnsavedChanges ? 'bg-pink-600 text-white animate-pulse-soft' : 'bg-white border border-slate-200 text-slate-400'}`}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs transition-all shadow-sm ${hasUnsavedChanges ? 'bg-pink-600 text-white animate-pulse-soft' : 'bg-white border border-slate-200 text-slate-400 hover:text-slate-600'}`}
                 >
                   <Save size={14} /> <span className="hidden sm:inline">지금 바로 연동</span>
                 </button>
@@ -326,7 +319,7 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-4">
-              {hasUnsavedChanges && <span className="text-[10px] font-black text-pink-400 animate-pulse hidden sm:inline">변경사항 연동 대기중...</span>}
+              {hasUnsavedChanges && <span className="text-[10px] font-black text-pink-400 animate-pulse hidden sm:inline">저장되지 않은 변경사항이 있습니다.</span>}
               <button onClick={() => { try { navigator.clipboard.writeText(window.location.href); alert("동기화 링크 복사됨!"); } catch(e) {} }} className="flex items-center gap-2 text-[11px] font-black text-slate-400 hover:text-white transition-colors"><Smartphone size={14} /> 기기연동</button>
             </div>
           </div>
@@ -382,7 +375,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-8 px-4 text-center border-t border-slate-100 bg-white">
-         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]"><span>지각관리시스템 v4.0</span><span className="w-1 h-1 rounded-full bg-slate-300"></span><span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span></div>
+         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]"><span>지각관리시스템 v4.2</span><span className="w-1 h-1 rounded-full bg-slate-300"></span><span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span></div>
       </footer>
 
       {isLoginModalOpen && (
