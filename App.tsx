@@ -63,17 +63,21 @@ const App: React.FC = () => {
       if (res.ok) {
         const text = await res.text();
         if (!text) {
+          // 데이터가 아예 없는 경우 (첫 생성 시)
           if (isManual) setSyncStatus('connected');
           return;
         }
         
         try {
           const data = JSON.parse(text);
-          if (data && data.updatedBy !== DEVICE_ID && data.timestamp > lastUpdateAtRef.current) {
+          // 1. 타 기기에서 온 데이터가 내 현재 데이터보다 최신인 경우에만 업데이트
+          // 2. 또는 내가 가진 학생 데이터가 아예 없을 때만 가져오기
+          if (data && (data.timestamp > lastUpdateAtRef.current || students.length === 0)) {
             isUpdatingFromRemote.current = true;
-            setAttendance(data.attendance || {});
-            setStudents(data.students || []);
-            setViolations(data.violations || DEFAULT_VIOLATIONS);
+            if (data.attendance) setAttendance(data.attendance);
+            if (data.students && data.students.length > 0) setStudents(data.students);
+            if (data.violations) setViolations(data.violations);
+            
             lastUpdateAtRef.current = data.timestamp;
             setLastSyncTime(new Date().toLocaleTimeString());
             setSyncStatus('connected');
@@ -89,7 +93,7 @@ const App: React.FC = () => {
     } catch (e) {
       if (isManual) setSyncStatus('error');
     }
-  }, [syncKey, isSetup]);
+  }, [syncKey, isSetup, students.length]);
 
   // 클라우드로 데이터 전송 (Push)
   const pushToCloud = useCallback(async (force = false) => {
@@ -113,10 +117,13 @@ const App: React.FC = () => {
       });
       if (res.ok) {
         lastUpdateAtRef.current = timestamp;
+        // 로컬 타임스탬프도 업데이트하여 중복 pull 방지
+        localStorage.setItem(`${STORAGE_KEY_PREFIX}ts_${syncKey}`, timestamp.toString());
+        
         setLastSyncTime(new Date().toLocaleTimeString());
         setSyncStatus('connected');
         setHasUnsavedChanges(false);
-        if (force) alert("클라우드 연동이 완료되었습니다.");
+        if (force) alert("클라우드 연동이 완료되었습니다. 모든 기기에 반영됩니다.");
       } else {
         setSyncStatus('error');
       }
@@ -125,38 +132,57 @@ const App: React.FC = () => {
     }
   }, [syncKey, isSetup, attendance, students, violations]);
 
+  // 앱 구동 시 로컬 저장소 데이터 로드
   useEffect(() => {
     if (!syncKey) return;
     try {
       const savedAttr = localStorage.getItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`);
       const savedStds = localStorage.getItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`);
       const savedVios = localStorage.getItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`);
+      const savedTs = localStorage.getItem(`${STORAGE_KEY_PREFIX}ts_${syncKey}`);
       
+      if (savedTs) lastUpdateAtRef.current = parseInt(savedTs);
       if (savedAttr) setAttendance(JSON.parse(savedAttr));
-      if (savedStds) setStudents(JSON.parse(savedStds));
-      else setStudents(generateInitialStudents());
+      
+      if (savedStds) {
+        const parsedStds = JSON.parse(savedStds);
+        if (parsedStds && parsedStds.length > 0) {
+          setStudents(parsedStds);
+        } else {
+          setStudents(generateInitialStudents());
+        }
+      } else {
+        // 로컬에 아예 정보가 없으면 초기 데이터 생성 (나중에 클라우드 데이터가 오면 덮어씌워짐)
+        setStudents(generateInitialStudents());
+      }
+      
       if (savedVios) setViolations(JSON.parse(savedVios));
     } catch (e) {
       setStudents(generateInitialStudents());
     }
+    // 로컬 데이터 로드 후 즉시 클라우드 데이터 확인
     fetchFromCloud();
   }, [syncKey]);
 
+  // 배경 동기화 (주기적으로 타 기기의 변경사항 확인)
   useEffect(() => {
     if (!syncKey || !isSetup) return;
-    const interval = setInterval(() => fetchFromCloud(false), 5000); // 5초 간격으로 완화
+    const interval = setInterval(() => fetchFromCloud(false), 8000); 
     return () => clearInterval(interval);
   }, [syncKey, isSetup, fetchFromCloud]);
 
+  // 상태 변화 감지 및 저장/푸시
   useEffect(() => {
     if (!syncKey || !isSetup) return;
     
+    // 로컬 저장소 즉시 업데이트 (네트워크 끊겨도 유지되도록)
     try {
       localStorage.setItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`, JSON.stringify(attendance));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`, JSON.stringify(students));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`, JSON.stringify(violations));
     } catch (e) {}
 
+    // 원격에서 업데이트 중인 경우는 푸시하지 않음
     if (isUpdatingFromRemote.current) {
       isUpdatingFromRemote.current = false;
       return;
@@ -164,10 +190,10 @@ const App: React.FC = () => {
 
     setHasUnsavedChanges(true);
     
-    // 10초 후 자동 백업 연동 (주기적)
+    // 5초 후 자동 백업 연동
     const timer = setTimeout(() => { 
       pushToCloud(false); 
-    }, 10000);
+    }, 5000);
     
     return () => clearTimeout(timer);
   }, [attendance, students, violations, syncKey, isSetup, pushToCloud]);
@@ -230,7 +256,7 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-3xl font-black text-white tracking-tight leading-tight">석포여자중학교<br/>지각관리시스템</h1>
-            <p className="text-slate-400 mt-3 font-medium text-sm">기기 간 실시간 동기화를 시작합니다.</p>
+            <p className="text-slate-400 mt-3 font-medium text-sm">데이터를 클라우드에 안전하게 보관합니다.</p>
           </div>
           <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-6">
             <div className="space-y-2">
@@ -241,6 +267,7 @@ const App: React.FC = () => {
                 className="w-full bg-slate-800/50 border-none rounded-2xl px-6 py-5 text-xl font-black text-pink-500 placeholder:text-slate-600 focus:ring-4 focus:ring-pink-500/20 transition-all text-center"
                 onKeyDown={(e) => e.key === 'Enter' && handleStart(e.currentTarget.value)}
               />
+              <p className="text-[10px] text-slate-500 font-bold">이 키가 같아야만 PC와 폰이 연결됩니다.</p>
             </div>
             <button 
               onClick={() => { const input = document.querySelector('input') as HTMLInputElement; if (input && input.value) handleStart(input.value); }}
@@ -277,6 +304,7 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => pushToCloud(true)}
+                  title="지금 바로 수동 연동"
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl font-black text-xs transition-all shadow-sm ${hasUnsavedChanges ? 'bg-pink-600 text-white animate-pulse-soft' : 'bg-white border border-slate-200 text-slate-400 hover:text-slate-600'}`}
                 >
                   <Save size={14} /> <span className="hidden sm:inline">지금 바로 연동</span>
@@ -319,7 +347,7 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-4">
-              {hasUnsavedChanges && <span className="text-[10px] font-black text-pink-400 animate-pulse hidden sm:inline">저장되지 않은 변경사항이 있습니다.</span>}
+              {hasUnsavedChanges && <span className="text-[10px] font-black text-pink-400 animate-pulse hidden sm:inline">서버와 데이터가 다릅니다. [연동]을 눌러주세요.</span>}
               <button onClick={() => { try { navigator.clipboard.writeText(window.location.href); alert("동기화 링크 복사됨!"); } catch(e) {} }} className="flex items-center gap-2 text-[11px] font-black text-slate-400 hover:text-white transition-colors"><Smartphone size={14} /> 기기연동</button>
             </div>
           </div>
@@ -375,7 +403,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-8 px-4 text-center border-t border-slate-100 bg-white">
-         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]"><span>석포여자중학교 지각관리시스템 v4.3</span><span className="w-1 h-1 rounded-full bg-slate-300"></span><span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span></div>
+         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]"><span>석포여자중학교 지각관리시스템 v4.5</span><span className="w-1 h-1 rounded-full bg-slate-300"></span><span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span></div>
       </footer>
 
       {isLoginModalOpen && (
