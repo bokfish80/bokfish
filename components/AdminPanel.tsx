@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Student, ViolationOption, AttendanceState } from '../types';
 import AiInsights from './AiInsights';
-import { Settings, UserPlus, Trash2, ShieldCheck, X, Cloud, Share2, Copy, FileSpreadsheet, ListPlus, Sparkles, Heart } from 'lucide-react';
+import { Settings, UserPlus, Trash2, ShieldCheck, X, Cloud, Share2, Copy, FileSpreadsheet, ListPlus, Sparkles } from 'lucide-react';
 
 interface AdminPanelProps {
   students: Student[];
@@ -25,7 +25,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
 
   const handleBulkParse = (text: string) => {
     const lines = text.split('\n').filter(line => line.trim() !== '');
-    const newStudents: Student[] = lines.map((line, idx) => {
+    const newStudents: Student[] = lines.map((line) => {
       const parts = line.split(/[\s,\t]+/).filter(p => p.trim() !== '');
       if (parts.length < 2) return null;
       
@@ -36,7 +36,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
       const classGroup = parseInt(number[1]);
 
       return {
-        id: `std-${number}-${Date.now()}`, // 학번 포함 ID로 변경
+        id: `std-${number}-${Date.now()}`,
         name: name,
         studentNumber: number,
         year: isNaN(year) ? 1 : year,
@@ -50,7 +50,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
   const commitBulkUpload = () => {
     if (bulkPreview.length === 0) return;
     if (confirm(`${bulkPreview.length}명의 학생을 명단에 추가하시겠습니까?`)) {
-      // 기존 명단과 합치기 (중복 학번 방지 로직은 상위에서 처리 가능)
       setStudents([...students, ...bulkPreview]);
       setBulkText('');
       setBulkPreview([]);
@@ -127,4 +126,26 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
                   <FileSpreadsheet size={24} className="text-pink-500" />
                   <h4 className="font-black text-slate-900">명단 일괄 등록</h4>
                 </div>
-                <textarea value={bulkText} onChange={(e) => { setBulkText(e.target.value); handleBulkParse(e.target.value); }} placeholder="학번 이름&#13;10101 홍길동" className="w-full h-40 bg-white border border-slate-200
+                <textarea 
+                  value={bulkText} 
+                  onChange={(e) => { setBulkText(e.target.value); handleBulkParse(e.target.value); }} 
+                  placeholder="학번 이름&#13;10101 홍길동" 
+                  className="w-full h-40 bg-white border border-slate-200 rounded-2xl p-4 text-sm font-mono focus:outline-none" 
+                />
+                {bulkPreview.length > 0 && (
+                  <button onClick={commitBulkUpload} className="w-full bg-slate-950 text-white py-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-xl"><ListPlus size={18} /> {bulkPreview.length}명 명단에 추가</button>
+                )}
+             </div>
+             <button onClick={() => { if(confirm('전체 명단을 삭제하시겠습니까?')){ setStudents([]); } }} className="w-full text-xs font-black text-red-400 py-3 border border-red-100 rounded-xl hover:bg-red-50 transition-colors">명단 전체 초기화</button>
+          </div>
+        )}
+
+        {activeTab === 'ai' && (
+          <AiInsights attendance={attendance} students={students} selectedDate={selectedDate} />
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default AdminPanel;
