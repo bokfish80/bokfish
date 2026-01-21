@@ -8,7 +8,6 @@ import AdminPanel from './components/AdminPanel';
 import { Search, Calendar, ChevronRight, TrendingUp, Sparkles, UserCheck, LayoutGrid, Users, GraduationCap, ChevronLeft, ShieldCheck, Lock, Unlock, X, Cloud, Share2, QrCode, ArrowRight, Info, CheckCircle2, AlertCircle, Check, Heart, Wifi, WifiOff, RefreshCw, Smartphone } from 'lucide-react';
 
 const DEVICE_ID = Math.random().toString(36).substring(7);
-// 고유하고 공개적인 버킷 ID 생성
 const BUCKET_KEY = "skp_v4_relay"; 
 
 const App: React.FC = () => {
@@ -29,7 +28,6 @@ const App: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [violations, setViolations] = useState<ViolationOption[]>(DEFAULT_VIOLATIONS);
 
-  // 동기화 제어 Ref
   const lastUpdateAtRef = useRef<number>(0);
   const isUpdatingFromRemote = useRef<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'syncing' | 'error'>('connected');
@@ -39,7 +37,6 @@ const App: React.FC = () => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [password, setPassword] = useState('');
 
-  // 클라우드 데이터 가져오기 (Pull)
   const fetchFromCloud = useCallback(async () => {
     if (!syncKey || !isSetup) return;
     const url = `https://kvdb.io/AnV9v8pB3vB6g7r9q8zX1/${BUCKET_KEY}_${syncKey}`;
@@ -47,45 +44,32 @@ const App: React.FC = () => {
     try {
       const res = await fetch(url);
       if (res.ok) {
-        const data = await res.json();
-        // 내가 보낸 것이 아니고, 서버 데이터가 내 로컬 데이터보다 최신인 경우만 업데이트
+        const text = await res.text();
+        if (!text) return;
+        const data = JSON.parse(text);
         if (data.updatedBy !== DEVICE_ID && data.timestamp > lastUpdateAtRef.current) {
-          console.log("Remote changes detected. Updating...");
           isUpdatingFromRemote.current = true;
-          
           setAttendance(data.attendance || {});
           setStudents(data.students || []);
           setViolations(data.violations || DEFAULT_VIOLATIONS);
-          
           lastUpdateAtRef.current = data.timestamp;
           setLastSyncTime(new Date().toLocaleTimeString());
           setSyncStatus('connected');
         }
       }
     } catch (e) {
-      console.warn("Pull failed (Normal if bucket is empty):", e);
+      console.warn("Sync fetch failed:", e);
     }
   }, [syncKey, isSetup]);
 
-  // 클라우드로 데이터 전송 (Push)
   const pushToCloud = useCallback(async (currentData: any) => {
     if (!syncKey || !isSetup) return;
     const url = `https://kvdb.io/AnV9v8pB3vB6g7r9q8zX1/${BUCKET_KEY}_${syncKey}`;
-    
     setSyncStatus('syncing');
     try {
       const timestamp = Date.now();
-      const payload = {
-        ...currentData,
-        updatedBy: DEVICE_ID,
-        timestamp: timestamp
-      };
-      
-      const res = await fetch(url, {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
-
+      const payload = { ...currentData, updatedBy: DEVICE_ID, timestamp: timestamp };
+      const res = await fetch(url, { method: 'PUT', body: JSON.stringify(payload) });
       if (res.ok) {
         lastUpdateAtRef.current = timestamp;
         setLastSyncTime(new Date().toLocaleTimeString());
@@ -94,53 +78,38 @@ const App: React.FC = () => {
         setSyncStatus('error');
       }
     } catch (e) {
-      console.error("Push failed:", e);
       setSyncStatus('error');
     }
   }, [syncKey, isSetup]);
 
-  // 1. 초기 로드
   useEffect(() => {
     if (!syncKey) return;
     const savedAttr = localStorage.getItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`);
     const savedStds = localStorage.getItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`);
     const savedVios = localStorage.getItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`);
-    
     if (savedAttr) setAttendance(JSON.parse(savedAttr));
     if (savedStds) setStudents(JSON.parse(savedStds));
     else setStudents(generateInitialStudents());
     if (savedVios) setViolations(JSON.parse(savedVios));
-
     fetchFromCloud();
   }, [syncKey, fetchFromCloud]);
 
-  // 2. 실시간 폴링 (1.5초 간격으로 단축하여 실시간성 강화)
   useEffect(() => {
     if (!syncKey || !isSetup) return;
     const interval = setInterval(fetchFromCloud, 1500);
     return () => clearInterval(interval);
   }, [syncKey, isSetup, fetchFromCloud]);
 
-  // 3. 데이터 변경 감지 및 자동 Push
   useEffect(() => {
     if (!syncKey || !isSetup) return;
-
-    // 로컬 저장
     localStorage.setItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`, JSON.stringify(attendance));
     localStorage.setItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`, JSON.stringify(students));
     localStorage.setItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`, JSON.stringify(violations));
-
-    // 리모트에서 온 업데이트면 다시 push하지 않음
     if (isUpdatingFromRemote.current) {
       isUpdatingFromRemote.current = false;
       return;
     }
-
-    // 디바운스 Push (연속 클릭 시 마지막 1번만 전송)
-    const timer = setTimeout(() => {
-      pushToCloud({ attendance, students, violations });
-    }, 400);
-
+    const timer = setTimeout(() => { pushToCloud({ attendance, students, violations }); }, 1000);
     return () => clearTimeout(timer);
   }, [attendance, students, violations, syncKey, isSetup, pushToCloud]);
 
@@ -149,11 +118,7 @@ const App: React.FC = () => {
     const records = Object.values(currentDayRecords);
     const late = records.filter(r => r.type === 'late').length;
     const absent = records.filter(r => r.type === 'absent').length;
-    return {
-      late, absent,
-      present: students.length - (late + absent),
-      total: students.length
-    };
+    return { late, absent, present: students.length - (late + absent), total: students.length };
   }, [attendance, selectedDate, students]);
 
   const filteredStudents = useMemo(() => {
@@ -202,7 +167,7 @@ const App: React.FC = () => {
           </div>
           <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-6">
             <div className="space-y-2">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">학교 동기화 키 (아이폰과 동일하게)</label>
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">학교 동기화 키</label>
               <input 
                 type="text" 
                 placeholder="예: seokpo-girls"
@@ -211,19 +176,11 @@ const App: React.FC = () => {
               />
             </div>
             <button 
-              onClick={() => {
-                const input = document.querySelector('input') as HTMLInputElement;
-                if (input.value) handleStart(input.value);
-              }}
+              onClick={() => { const input = document.querySelector('input') as HTMLInputElement; if (input.value) handleStart(input.value); }}
               className="w-full bg-white text-slate-950 py-5 rounded-2xl font-black text-lg hover:bg-pink-500 hover:text-white transition-all active:scale-95 shadow-xl flex items-center justify-center gap-2 group"
             >
               시스템 시작 <ArrowRight className="group-hover:translate-x-1 transition-transform" />
             </button>
-            <div className="pt-4 border-t border-white/5">
-              <p className="text-[10px] text-slate-500 font-bold leading-relaxed">
-                * 동일한 키를 가진 기기끼리 1초 내외로 데이터가 자동 공유됩니다.
-              </p>
-            </div>
           </div>
         </div>
       </div>
@@ -244,69 +201,30 @@ const App: React.FC = () => {
                   <h1 className="text-lg font-black text-slate-900 tracking-tight leading-none">석포여중 지각관리</h1>
                   <div className="flex items-center gap-2 mt-1.5">
                     <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${syncStatus === 'error' ? 'bg-red-50 border-red-200' : 'bg-slate-100 border-slate-200'}`}>
-                      {syncStatus === 'syncing' ? (
-                        <RefreshCw size={10} className="text-pink-500 animate-spin" />
-                      ) : syncStatus === 'error' ? (
-                        <WifiOff size={10} className="text-red-500" />
-                      ) : (
-                        <Wifi size={10} className="text-green-500" />
-                      )}
-                      <span className="text-[8px] font-black text-slate-500 uppercase">
-                        {syncStatus === 'syncing' ? '전송중' : syncStatus === 'error' ? '연결오류' : syncKey}
-                      </span>
+                      {syncStatus === 'syncing' ? <RefreshCw size={10} className="text-pink-500 animate-spin" /> : syncStatus === 'error' ? <WifiOff size={10} className="text-red-500" /> : <Wifi size={10} className="text-green-500" />}
+                      <span className="text-[8px] font-black text-slate-500 uppercase">{syncStatus === 'syncing' ? 'Syncing' : syncStatus === 'error' ? 'Error' : syncKey}</span>
                     </div>
-                    {lastSyncTime && (
-                      <span className="text-[8px] font-bold text-slate-400">최근: {lastSyncTime}</span>
-                    )}
                   </div>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => setIsLoginModalOpen(true)}
-                  className="bg-slate-950 text-white p-3 md:px-4 md:py-2.5 rounded-2xl text-xs font-black shadow-lg hover:bg-slate-800 active:scale-95 transition-all flex items-center gap-2"
-                >
-                  <Lock size={16} /> <span className="hidden md:inline">관리자</span>
-                </button>
-              </div>
+              <button onClick={() => setIsLoginModalOpen(true)} className="bg-slate-950 text-white p-3 rounded-2xl hover:bg-slate-800 transition-all"><Lock size={16} /></button>
             </div>
-
             <div className="flex flex-col md:flex-row gap-2">
               <div className="relative flex items-center bg-white rounded-2xl px-4 py-3 border border-slate-200 shadow-sm w-full md:w-auto">
                 <Calendar size={18} className="text-pink-500 mr-2 shrink-0" />
-                <input 
-                  type="date" 
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-transparent text-sm font-black focus:outline-none text-slate-700 w-full"
-                />
+                <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-transparent text-sm font-black focus:outline-none text-slate-700 w-full" />
               </div>
               <div className="relative flex-1">
                 <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input 
-                  type="text" 
-                  placeholder="학생 검색..."
-                  className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-3 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all shadow-sm"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
+                <input type="text" placeholder="학생 검색..." className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-3 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all shadow-sm" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
               </div>
             </div>
           </div>
         </div>
-
-        <div className="max-w-7xl mx-auto px-4 md:px-8 overflow-x-auto scrollbar-hide">
+        <div className="max-w-7xl mx-auto px-4 md:px-8">
           <nav className="flex gap-8 whitespace-nowrap pt-2">
-            {[
-              { id: 'list', label: '현황판', icon: LayoutGrid },
-              { id: 'stats', label: '분석기', icon: TrendingUp }
-            ].map((tab) => (
-              <button 
-                key={tab.id}
-                onClick={() => {setActiveTab(tab.id as any); setIsAdminOpen(false);}}
-                className={`pb-4 text-[13px] font-black transition-all flex items-center gap-2.5 border-b-4 ${activeTab === tab.id && !isAdminOpen ? 'border-pink-600 text-pink-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-              >
+            {[{ id: 'list', label: '현황판', icon: LayoutGrid }, { id: 'stats', label: '분석기', icon: TrendingUp }].map((tab) => (
+              <button key={tab.id} onClick={() => {setActiveTab(tab.id as any); setIsAdminOpen(false);}} className={`pb-4 text-[13px] font-black transition-all flex items-center gap-2.5 border-b-4 ${activeTab === tab.id && !isAdminOpen ? 'border-pink-600 text-pink-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                 <tab.icon size={18} /> {tab.label}
               </button>
             ))}
@@ -318,43 +236,21 @@ const App: React.FC = () => {
         <div className="bg-slate-950 text-white">
           <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center justify-between overflow-x-auto scrollbar-hide">
             <div className="flex items-center gap-4 whitespace-nowrap">
-              <span className="text-[11px] font-black text-slate-500 uppercase tracking-tighter">실시간 연동 상태: OK</span>
+              <span className="text-[11px] font-black text-slate-500 uppercase">Today Summary</span>
               <div className="flex gap-2">
                 <span className="bg-white/10 px-3 py-1 rounded-full text-[11px] font-black">출석 {stats.present}</span>
                 <span className="bg-yellow-400/20 text-yellow-400 px-3 py-1 rounded-full text-[11px] font-black">지각 {stats.late}</span>
                 <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-full text-[11px] font-black">결석 {stats.absent}</span>
               </div>
             </div>
-            <div className="flex items-center gap-4 shrink-0 ml-4">
-               <button 
-                  onClick={() => {
-                    const url = window.location.href;
-                    navigator.clipboard.writeText(url);
-                    alert("동기화 링크가 복사되었습니다! 아이폰 브라우저에 접속하세요.");
-                  }}
-                  className="flex items-center gap-2 text-[11px] font-black text-pink-400 hover:text-pink-300 transition-colors"
-                >
-                  <Smartphone size={14} /> 기기연동
-                </button>
-            </div>
+            <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert("동기화 링크 복사됨!"); }} className="flex items-center gap-2 text-[11px] font-black text-pink-400"><Smartphone size={14} /> 기기연동</button>
           </div>
         </div>
       )}
 
       <main className="flex-1 max-w-7xl mx-auto px-4 md:px-8 py-4 md:py-8 w-full flex flex-col">
         {isAdminOpen ? (
-          <div className="max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500 w-full">
-            <AdminPanel 
-              students={students} 
-              setStudents={setStudents}
-              violations={violations}
-              setViolations={setViolations}
-              attendance={attendance}
-              selectedDate={selectedDate}
-              syncKey={syncKey}
-              onClose={() => setIsAdminOpen(false)}
-            />
-          </div>
+          <div className="max-w-4xl mx-auto w-full"><AdminPanel students={students} setStudents={setStudents} violations={violations} setViolations={setViolations} attendance={attendance} selectedDate={selectedDate} syncKey={syncKey} onClose={() => setIsAdminOpen(false)} /></div>
         ) : activeTab === 'list' ? (
           <div className="animate-in fade-in duration-500 space-y-4 md:space-y-8 flex-1 flex flex-col">
             {!searchQuery && currentYear === null && (
@@ -362,63 +258,34 @@ const App: React.FC = () => {
                 {[1, 2, 3].map(year => {
                   const theme = gradeThemes[year as keyof typeof gradeThemes];
                   return (
-                    <button 
-                      key={year}
-                      onClick={() => setCurrentYear(year)}
-                      className={`group relative flex-1 flex flex-row md:flex-col items-center justify-center gap-4 md:gap-6 bg-white border border-slate-200 p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem] transition-all hover:shadow-2xl ${theme.hover} overflow-hidden`}
-                    >
+                    <button key={year} onClick={() => setCurrentYear(year)} className={`group relative flex-1 flex flex-row md:flex-col items-center justify-center gap-4 md:gap-6 bg-white border border-slate-200 p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem] transition-all hover:shadow-2xl ${theme.hover} overflow-hidden`}>
                       <div className={`absolute top-0 right-0 w-16 h-16 md:w-24 md:h-24 ${theme.bg} rounded-full translate-x-1/2 -translate-y-1/2 group-hover:scale-150 transition-transform duration-700`}></div>
-                      <div className={`relative bg-slate-50 p-4 md:p-8 rounded-[1.5rem] md:rounded-[2rem] text-slate-300 ${theme.active} group-hover:text-white transition-all duration-500`}>
-                        <GraduationCap className="w-10 h-10 md:w-16 md:h-16" />
-                      </div>
-                      <div className="relative text-left md:text-center">
-                        <h3 className={`text-2xl md:text-3xl font-black text-slate-900 ${theme.text} transition-colors`}>{year}학년</h3>
-                        <p className="text-xs md:text-sm font-bold text-slate-400 mt-1 md:mt-2">반 선택</p>
-                      </div>
+                      <div className={`relative bg-slate-50 p-4 md:p-8 rounded-[1.5rem] md:rounded-[2rem] text-slate-300 ${theme.active} group-hover:text-white transition-all duration-500`}><GraduationCap className="w-10 h-10 md:w-16 md:h-16" /></div>
+                      <div className="relative text-left md:text-center"><h3 className={`text-2xl md:text-3xl font-black text-slate-900 ${theme.text} transition-colors`}>{year}학년</h3><p className="text-xs md:text-sm font-bold text-slate-400 mt-1 md:mt-2">반 선택</p></div>
                     </button>
                   );
                 })}
               </div>
             )}
-
             {!searchQuery && currentYear !== null && currentClass === null && (
               <div className="space-y-6 flex-1">
-                <button onClick={() => setCurrentYear(null)} className="flex items-center gap-2 text-slate-400 font-black hover:text-pink-600 transition-colors text-sm">
-                  <ChevronLeft size={20} /> 학년 선택으로
-                </button>
+                <button onClick={() => setCurrentYear(null)} className="flex items-center gap-2 text-slate-400 font-black hover:text-pink-600 transition-colors text-sm"><ChevronLeft size={20} /> 학년 선택으로</button>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[1, 2, 3, 4].map(cls => (
-                    <button 
-                      key={cls}
-                      onClick={() => setCurrentClass(cls)}
-                      className="bg-white border border-slate-200 p-8 rounded-3xl hover:border-pink-500 hover:shadow-xl transition-all flex flex-col items-center gap-4 group"
-                    >
-                      <div className="bg-slate-50 p-4 rounded-2xl text-slate-400 group-hover:bg-pink-50 group-hover:text-pink-500 transition-colors">
-                        <Users size={32} />
-                      </div>
+                    <button key={cls} onClick={() => setCurrentClass(cls)} className="bg-white border border-slate-200 p-8 rounded-3xl hover:border-pink-500 hover:shadow-xl transition-all flex flex-col items-center gap-4 group">
+                      <div className="bg-slate-50 p-4 rounded-2xl text-slate-400 group-hover:bg-pink-50 group-hover:text-pink-500 transition-colors"><Users size={32} /></div>
                       <h3 className="text-xl font-black text-slate-900">{cls}반</h3>
                     </button>
                   ))}
                 </div>
               </div>
             )}
-
             {(searchQuery || (currentYear !== null && currentClass !== null)) && (
               <div className="space-y-6 flex-1">
-                {!searchQuery && (
-                  <button onClick={() => setCurrentClass(null)} className="flex items-center gap-2 text-slate-400 font-black hover:text-pink-600 transition-colors text-sm">
-                    <ChevronLeft size={20} /> 반 선택으로
-                  </button>
-                )}
+                {!searchQuery && <button onClick={() => setCurrentClass(null)} className="flex items-center gap-2 text-slate-400 font-black hover:text-pink-600 transition-colors text-sm"><ChevronLeft size={20} /> 반 선택으로</button>}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {filteredStudents.map(student => (
-                    <StudentCard 
-                      key={student.id} 
-                      student={student} 
-                      entry={attendance[selectedDate]?.[student.id]}
-                      violations={violations}
-                      onStatusChange={(status, options) => updateStatus(status, student.id, options)}
-                    />
+                    <StudentCard key={student.id} student={student} entry={attendance[selectedDate]?.[student.id]} violations={violations} onStatusChange={(status, options) => updateStatus(status, student.id, options)} />
                   ))}
                 </div>
               </div>
@@ -430,38 +297,16 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-8 px-4 text-center">
-         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-            <span>석포여자중학교 지각관리시스템</span>
-            <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-            <span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span>
-         </div>
+         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]"><span>석포여자중학교 지각관리시스템</span><span className="w-1 h-1 rounded-full bg-slate-300"></span><span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span></div>
       </footer>
 
       {isLoginModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
           <div className="bg-white rounded-[3rem] p-8 md:p-12 w-full max-w-sm shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-2 bg-pink-600"></div>
-            <div className="flex flex-col items-center text-center gap-6 mb-10">
-              <div className="bg-slate-100 p-6 rounded-[2rem] text-slate-900 shadow-inner">
-                <Lock size={40} />
-              </div>
-              <h3 className="text-2xl font-black text-slate-900">관리자 인증</h3>
-            </div>
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              if (password === '1111') { setIsAdminOpen(true); setIsLoginModalOpen(false); setPassword(''); }
-              else { alert('비밀번호가 틀렸습니다.'); setPassword(''); }
-            }} className="space-y-6">
-              <input 
-                autoFocus
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="비밀번호"
-                className="w-full bg-slate-50 border-none rounded-3xl px-4 py-6 text-4xl font-black tracking-[0.8em] text-center text-pink-600 focus:ring-4 focus:ring-pink-500/10 transition-all"
-              />
+            <div className="flex flex-col items-center text-center gap-6 mb-10"><div className="bg-slate-100 p-6 rounded-[2rem] text-slate-900 shadow-inner"><Lock size={40} /></div><h3 className="text-2xl font-black text-slate-900">관리자 인증</h3></div>
+            <form onSubmit={(e) => { e.preventDefault(); if (password === '1111') { setIsAdminOpen(true); setIsLoginModalOpen(false); setPassword(''); } else { alert('비밀번호가 틀렸습니다.'); setPassword(''); } }} className="space-y-6">
+              <input autoFocus type="password" inputMode="numeric" maxLength={4} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호" className="w-full bg-slate-50 border-none rounded-3xl px-4 py-6 text-4xl font-black tracking-[0.8em] text-center text-pink-600 focus:ring-4 focus:ring-pink-500/10 transition-all" />
               <div className="flex gap-4">
                 <button type="button" onClick={() => setIsLoginModalOpen(false)} className="flex-1 py-5 text-sm font-black text-slate-400">닫기</button>
                 <button type="submit" className="flex-1 bg-slate-950 text-white py-5 rounded-[1.5rem] font-black hover:bg-pink-600 transition-all">인증</button>

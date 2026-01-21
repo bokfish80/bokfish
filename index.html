@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -15,8 +14,13 @@
             console.error("Global Error caught:", message, error);
             return false;
         };
-        // process.env.API_KEY 폴리필
-        window.process = { env: { API_KEY: "" } };
+        // process.env 폴리필 (Recharts 등 라이브러리 호환성)
+        window.process = { 
+            env: { 
+                API_KEY: "",
+                NODE_ENV: "production"
+            } 
+        };
     </script>
     <style>
         body {

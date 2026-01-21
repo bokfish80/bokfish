@@ -16,10 +16,8 @@ const AiInsights: React.FC<AiInsightsProps> = ({ attendance, students, selectedD
   const [error, setError] = useState<string | null>(null);
 
   const generateInsight = async () => {
-    // process 객체 존재 여부 및 API_KEY 확인
-    const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : undefined;
-
-    if (!apiKey) {
+    // API_KEY must be obtained exclusively from the environment variable process.env.API_KEY.
+    if (!process.env.API_KEY) {
       setError("Gemini API 키가 설정되지 않았습니다.");
       return;
     }
@@ -28,7 +26,8 @@ const AiInsights: React.FC<AiInsightsProps> = ({ attendance, students, selectedD
     setError(null);
     
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      // Always use const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const currentDay = attendance[selectedDate] || {};
       
       const lateList = Object.entries(currentDay)
@@ -65,11 +64,14 @@ const AiInsights: React.FC<AiInsightsProps> = ({ attendance, students, selectedD
         친근하면서도 신뢰감 있는 중학교 선생님 말투를 사용해줘.
       `;
 
+      // Use ai.models.generateContent to query GenAI with both the model name and prompt.
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt,
       });
 
+      // The simplest and most direct way to get the generated text content is by accessing the .text property.
+      // Do not use response.text().
       setInsight(response.text || "데이터 분석에 실패했습니다.");
     } catch (err: any) {
       console.error(err);
