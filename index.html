@@ -10,8 +10,13 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script>
-        // process.env.API_KEY 접근 시 ReferenceError 방지를 위한 폴리필
-        window.process = window.process || { env: { API_KEY: "" } };
+        // 전역 에러 핸들러
+        window.onerror = function(message, source, lineno, colno, error) {
+            console.error("Global Error caught:", message, error);
+            return false;
+        };
+        // process.env.API_KEY 폴리필
+        window.process = { env: { API_KEY: "" } };
     </script>
     <style>
         body {
@@ -52,7 +57,6 @@
 </head>
 <body>
     <div id="root"></div>
-    <!-- 앱 실행을 위한 메인 스크립트 추가 -->
     <script type="module" src="index.tsx"></script>
 </body>
 </html>
