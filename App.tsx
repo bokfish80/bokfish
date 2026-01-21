@@ -1,11 +1,15 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { generateInitialStudents, DEFAULT_VIOLATIONS } from './constants';
 import { AttendanceState, AttendanceStatus, AttendanceEntry, Student, ViolationOption } from './types';
 import StudentCard from './components/StudentCard';
 import StatsDashboard from './components/StatsDashboard';
 import AdminPanel from './components/AdminPanel';
-import { Search, Calendar, ChevronRight, TrendingUp, Sparkles, UserCheck, LayoutGrid, Users, GraduationCap, ChevronLeft, ShieldCheck, Lock, Unlock, X, Cloud, Share2, QrCode, ArrowRight, Info, CheckCircle2, AlertCircle, Check, Heart } from 'lucide-react';
+import { Search, Calendar, ChevronRight, TrendingUp, Sparkles, UserCheck, LayoutGrid, Users, GraduationCap, ChevronLeft, ShieldCheck, Lock, Unlock, X, Cloud, Share2, QrCode, ArrowRight, Info, CheckCircle2, AlertCircle, Check, Heart, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+
+// 기기 고유 ID 생성 (무한 루프 방지용)
+const DEVICE_ID = Math.random().toString(36).substring(7);
+const KVDB_BUCKET = "skp_attendance_v2"; // 고유 버킷 명칭
 
 const App: React.FC = () => {
   const STORAGE_KEY_PREFIX = 'sg_pro_';
@@ -29,6 +33,12 @@ const App: React.FC = () => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [password, setPassword] = useState('');
 
+  // 동기화 관련 상태
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number>(0);
+  const isInternalUpdate = useRef(false);
+
+  // 1. 초기 데이터 로드
   useEffect(() => {
     const urlKey = getUrlKey();
     if (urlKey) {
@@ -40,34 +50,81 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!syncKey) return;
-
-    const loadData = () => {
+    const loadLocal = () => {
       const savedAttendance = localStorage.getItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`);
       const savedStudents = localStorage.getItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`);
       const savedViolations = localStorage.getItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`);
-
       if (savedAttendance) setAttendance(JSON.parse(savedAttendance));
       if (savedStudents) setStudents(JSON.parse(savedStudents));
       else setStudents(generateInitialStudents());
       if (savedViolations) setViolations(JSON.parse(savedViolations));
     };
-
-    loadData();
-
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key?.startsWith(STORAGE_KEY_PREFIX)) loadData();
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    loadLocal();
   }, [syncKey]);
 
+  // 2. 실시간 클라우드 동기화 (Push & Pull)
+  const syncWithCloud = async (action: 'push' | 'pull', data?: any) => {
+    if (!syncKey) return;
+    const url = `https://kvdb.io/AnV9v8pB3vB6g7r9q8zX1/${KVDB_BUCKET}_${syncKey}`;
+    
+    try {
+      if (action === 'push') {
+        setIsSyncing(true);
+        const payload = {
+          attendance: data.attendance,
+          students: data.students,
+          violations: data.violations,
+          updatedBy: DEVICE_ID,
+          timestamp: Date.now()
+        };
+        await fetch(url, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        setLastSyncedAt(payload.timestamp);
+      } else {
+        const res = await fetch(url);
+        if (res.ok) {
+          const remoteData = await res.json();
+          // 내가 보낸 것이 아니고, 클라우드 데이터가 더 최신일 때만 업데이트
+          if (remoteData.updatedBy !== DEVICE_ID && remoteData.timestamp > lastSyncedAt) {
+            isInternalUpdate.current = true;
+            setAttendance(remoteData.attendance);
+            setStudents(remoteData.students);
+            setViolations(remoteData.violations);
+            setLastSyncedAt(remoteData.timestamp);
+            console.log("Remote data synced!");
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Sync Error:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // 실시간 폴링 (3초 간격으로 데이터 가져오기)
+  useEffect(() => {
+    if (!syncKey || !isSetup) return;
+    const interval = setInterval(() => syncWithCloud('pull'), 3000);
+    return () => clearInterval(interval);
+  }, [syncKey, isSetup, lastSyncedAt]);
+
+  // 데이터 변경 시 로컬 저장 및 클라우드 전송
   useEffect(() => {
     if (syncKey && isSetup) {
       localStorage.setItem(`${STORAGE_KEY_PREFIX}attr_${syncKey}`, JSON.stringify(attendance));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}std_${syncKey}`, JSON.stringify(students));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}vio_${syncKey}`, JSON.stringify(violations));
+
+      // 내부에서 상태가 변경되었을 때만 클라우드에 푸시 (무한 루프 방지)
+      if (!isInternalUpdate.current) {
+        syncWithCloud('push', { attendance, students, violations });
+      }
+      isInternalUpdate.current = false;
     }
-  }, [attendance, students, violations, syncKey, isSetup]);
+  }, [attendance, students, violations]);
 
   const stats = useMemo(() => {
     const currentDayRecords = attendance[selectedDate] || {};
@@ -121,7 +178,7 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-3xl font-black text-white tracking-tight leading-tight">석포여자중학교<br/>지각관리시스템</h1>
-            <p className="text-slate-400 mt-3 font-medium">스마트 학생 지도 및 동기화 시스템</p>
+            <p className="text-slate-400 mt-3 font-medium">스마트 학생 지도 및 실시간 동기화</p>
           </div>
           <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-6">
             <div className="space-y-2">
@@ -161,9 +218,19 @@ const App: React.FC = () => {
                 </div>
                 <div>
                   <h1 className="text-lg font-black text-slate-900 tracking-tight leading-none">석포여중 지각관리시스템</h1>
-                  <div className="flex items-center gap-1.5 mt-1.5">
-                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse-soft"></div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Sync Active: {syncKey}</span>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse-soft"></div>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{syncKey}</span>
+                    </div>
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-full border border-slate-200">
+                      {isSyncing ? (
+                        <RefreshCw size={10} className="text-pink-500 animate-spin" />
+                      ) : (
+                        <Cloud size={10} className="text-blue-400" />
+                      )}
+                      <span className="text-[8px] font-black text-slate-500 uppercase">{isSyncing ? 'Syncing...' : 'Connected'}</span>
+                    </div>
                   </div>
                 </div>
               </div>
