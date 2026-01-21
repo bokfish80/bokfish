@@ -1,5 +1,4 @@
 // App.tsx 상단에 추가
-const KV_BUCKET = 'AnV9v8pB3vB6g7r9q8zX1'; // 아무 문자열 가능
 const KV_KEY = 'seokpo_shared_data';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -65,14 +64,14 @@ const App: React.FC = () => {
         if (text && text !== "null") {
           const data = JSON.parse(text);
           // 서버 데이터가 더 최신이거나 기기가 다른 경우 동기화
-          if (data && (data.timestamp > lastUpdateAtRef.current || data.updatedBy !== DEVICE_ID)) {
-            setAttendance(data.attendance || {});
-            setStudents(data.students || []);
-            setViolations(data.violations || DEFAULT_VIOLATIONS);
-            lastUpdateAtRef.current = data.timestamp;
-            setLastSyncTime(new Date().toLocaleTimeString());
-            setIsDataDirty(false); // 서버 데이터를 받았으므로 Dirty 아님
-          }
+          if (data && data.timestamp > lastUpdateAtRef.current) {
+  setAttendance(data.attendance || {});
+  setStudents(data.students || []);
+  setViolations(data.violations || DEFAULT_VIOLATIONS);
+  lastUpdateAtRef.current = data.timestamp;
+  setLastSyncTime(new Date().toLocaleTimeString());
+  setIsDataDirty(false);
+}
         }
       }
       setSyncStatus('connected');
@@ -144,50 +143,7 @@ const App: React.FC = () => {
     // 2. 서버 데이터 필수 확인 (Pull이 끝나야 Push 허용됨)
     fetchFromCloud(true);
   }, [isSetup]);
-
-useEffect(() => {
-  const loadFromCloud = async () => {
-    try {
-      const res = await fetch(`https://kvdb.io/${KV_BUCKET}/${KV_KEY}`);
-      if (!res.ok) return;
-
-      const text = await res.text();
-      if (!text) return;
-
-      const data = JSON.parse(text);
-      setAttendance(data.attendance || {});
-      setStudents(data.students || []);
-      setViolations(data.violations || []);
-    } catch (e) {
-      console.error('클라우드 로드 실패', e);
-    }
-  };
-
-  loadFromCloud();
-}, []);
-
-useEffect(() => {
-  const saveToCloud = async () => {
-    const payload = {
-      attendance,
-      students,
-      violations,
-      updatedAt: Date.now()
-    };
-
-    try {
-      await fetch(`https://kvdb.io/${KV_BUCKET}/${KV_KEY}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    } catch (e) {
-      console.error('클라우드 저장 실패', e);
-    }
-  };
-
-  saveToCloud();
-}, [attendance, students, violations]);
+  
 
 
   // 주기적 서버 체크 (6초)
