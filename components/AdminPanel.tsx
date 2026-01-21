@@ -69,7 +69,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
       <div className="bg-slate-950 px-8 py-6 flex items-center justify-between text-white shrink-0">
         <div className="flex items-center gap-3">
           <ShieldCheck className="text-pink-500" />
-          <h2 className="text-xl font-black tracking-tight">Admin Dashboard</h2>
+          <h2 className="text-xl font-black tracking-tight">관리자 설정</h2>
         </div>
         <button onClick={onClose} className="p-3 hover:bg-white/10 rounded-full transition-colors">
           <X size={24} />
@@ -98,8 +98,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2">
             <div className="bg-pink-600 p-8 rounded-[2.5rem] text-white space-y-6 shadow-xl shadow-pink-500/20">
               <div className="space-y-2">
-                <h4 className="text-2xl font-black tracking-tight">아이폰 동기화 링크</h4>
-                <p className="text-pink-100 text-sm font-medium">이 주소를 아이폰으로 공유하면 즉시 데이터가 연결됩니다.</p>
+                <h4 className="text-2xl font-black tracking-tight">기기 동기화 링크</h4>
+                <p className="text-pink-100 text-sm font-medium">이 주소를 다른 기기(아이폰 등)로 공유하면 즉시 데이터가 연결됩니다.</p>
               </div>
               <div className="bg-slate-950/20 p-4 rounded-2xl break-all text-[11px] font-mono font-bold border border-white/10">
                 {shareUrl}

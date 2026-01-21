@@ -229,7 +229,7 @@ const App: React.FC = () => {
             <UserCheck size={40} />
           </div>
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight leading-tight">지각관리시스템</h1>
+            <h1 className="text-3xl font-black text-white tracking-tight leading-tight">석포여자중학교<br/>지각관리시스템</h1>
             <p className="text-slate-400 mt-3 font-medium text-sm">기기 간 실시간 동기화를 시작합니다.</p>
           </div>
           <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-6">
@@ -265,7 +265,7 @@ const App: React.FC = () => {
                   <UserCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-black text-slate-900 tracking-tight leading-none">지각관리시스템</h1>
+                  <h1 className="text-lg font-black text-slate-900 tracking-tight leading-none">석포여자중학교 지각관리시스템</h1>
                   <div className="flex items-center gap-2 mt-1.5">
                     <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${syncStatus === 'error' ? 'bg-orange-50 border-orange-200' : 'bg-slate-100 border-slate-200'}`}>
                       {syncStatus === 'syncing' ? <RefreshCw size={10} className="text-pink-500 animate-spin" /> : syncStatus === 'error' ? <WifiOff size={10} className="text-orange-500" /> : <Wifi size={10} className="text-green-500" />}
@@ -375,7 +375,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-8 px-4 text-center border-t border-slate-100 bg-white">
-         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]"><span>지각관리시스템 v4.2</span><span className="w-1 h-1 rounded-full bg-slate-300"></span><span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span></div>
+         <div className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]"><span>석포여자중학교 지각관리시스템 v4.3</span><span className="w-1 h-1 rounded-full bg-slate-300"></span><span className="flex items-center gap-1">김용섭 제작 <Heart size={10} className="text-pink-500 fill-pink-500" /></span></div>
       </footer>
 
       {isLoginModalOpen && (
