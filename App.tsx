@@ -59,6 +59,9 @@ const App: React.FC = () => {
   
   const [currentYear, setCurrentYear] = useState<number | null>(null);
   const [currentClass, setCurrentClass] = useState<number | null>(null);
+  
+  // 상태 필터링을 위한 state 추가
+  const [statusFilter, setStatusFilter] = useState<AttendanceStatus | 'normal' | null>(null);
 
   const [attendance, setAttendance] = useState<AttendanceState>({});
   const [students, setStudents] = useState<Student[]>([]);
@@ -85,7 +88,6 @@ const App: React.FC = () => {
 
   /* ===================== Firebase 실시간 동기화 로직 ===================== */
 
-  // 1. 데이터 수신 (Listening)
   useEffect(() => {
     if (!dataRef || !auth) return;
 
@@ -93,16 +95,14 @@ const App: React.FC = () => {
     const unsubscribe = onValue(dataRef, (snapshot) => {
       const data = snapshot.val() as SyncPayload;
       if (data) {
-        // 서버의 타임스탬프가 내가 마지막으로 보낸/받은 것보다 최신일 때만 업데이트
         if (data.timestamp > lastServerTimestamp.current && data.updatedBy !== DEVICE_ID) {
-          isLocalChange.current = false; // 리모트 업데이트임을 명시
+          isLocalChange.current = false;
           setAttendance(data.attendance || {});
           setStudents(data.students || []);
           setViolations(data.violations || DEFAULT_VIOLATIONS);
           lastServerTimestamp.current = data.timestamp;
         }
       } else if (!ready) {
-        // 데이터가 전혀 없는 경우 초기화
         setStudents(generateInitialStudents());
         isLocalChange.current = true;
       }
@@ -118,7 +118,6 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [dataRef, auth, ready]);
 
-  // 2. 데이터 전송 (Push)
   const pushToFirebase = useCallback(async (force = false) => {
     if (!dataRef || !ready || (!isLocalChange.current && !force)) return;
 
@@ -144,21 +143,16 @@ const App: React.FC = () => {
     }
   }, [attendance, students, violations, dataRef, ready]);
 
-  // 자동 푸시 (사용자가 데이터를 바꾼 경우에만 실행)
   useEffect(() => {
     if (!ready || !isLocalChange.current) return;
-    
-    const t = setTimeout(() => {
-      pushToFirebase();
-    }, 1000);
-
+    const t = setTimeout(() => { pushToFirebase(); }, 1000);
     return () => clearTimeout(t);
   }, [attendance, students, violations, ready, pushToFirebase]);
 
   /* ===================== 출결 업데이트 ===================== */
 
   const updateStatus = (status: AttendanceStatus | null, studentId: string, options?: Partial<AttendanceEntry>) => {
-    isLocalChange.current = true; // 로컬에서 변경됨을 표시
+    isLocalChange.current = true;
     setAttendance(prev => {
       const day = { ...(prev[selectedDate] || {}) };
       if (status === null) delete day[studentId];
@@ -177,6 +171,37 @@ const App: React.FC = () => {
     const total = students.length;
     return { late, absent, normal: total - (late + absent), total };
   }, [attendance, selectedDate, students]);
+
+  /* ===================== 필터링 로직 ===================== */
+
+  const filteredStudents = useMemo(() => {
+    return students.filter(s => {
+      const entry = attendance[selectedDate]?.[s.id];
+      const sStatus = entry?.type || 'normal';
+
+      // 1. 상태 필터링 체크
+      const matchesStatus = statusFilter === null || sStatus === statusFilter;
+      if (!matchesStatus) return false;
+
+      // 2. 검색어 체크
+      const matchesSearch = s.name.includes(searchQuery) || s.studentNumber.includes(searchQuery);
+      if (searchQuery) return matchesSearch;
+
+      // 3. 학년/반 체크
+      const matchesYear = currentYear === null || s.year === currentYear;
+      const matchesClass = currentClass === null || s.classGroup === currentClass;
+      
+      return matchesYear && matchesClass;
+    });
+  }, [students, attendance, selectedDate, statusFilter, searchQuery, currentYear, currentClass]);
+
+  // 필터 초기화 유틸
+  const resetFilters = () => {
+    setCurrentYear(null);
+    setCurrentClass(null);
+    setStatusFilter(null);
+    setSearchQuery('');
+  };
 
   /* ===================== UI 렌더링 ===================== */
 
@@ -240,17 +265,11 @@ const App: React.FC = () => {
     );
   }
 
-  const filteredStudents = students.filter(s => {
-    const matchesSearch = s.name.includes(searchQuery) || s.studentNumber.includes(searchQuery);
-    if (searchQuery) return matchesSearch;
-    return (currentYear === null || s.year === currentYear) && (currentClass === null || s.classGroup === currentClass);
-  });
-
   return (
     <div className="min-h-screen flex flex-col bg-[#f8fafc]">
       <header className="glass sticky top-0 z-40 border-b border-slate-200/50 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 md:px-8 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-4 cursor-pointer" onClick={() => {setCurrentYear(null); setCurrentClass(null); setActiveTab('list');}}>
+          <div className="flex items-center gap-4 cursor-pointer" onClick={resetFilters}>
             <div className="bg-slate-950 p-3 rounded-2xl text-white shadow-xl">
               <UserCheck className="w-6 h-6" />
             </div>
@@ -286,7 +305,7 @@ const App: React.FC = () => {
           </div>
           <div className="relative flex-1">
             <Search size={20} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input type="text" placeholder="학생 검색 (이름/학번)" className="w-full bg-white border border-slate-200 rounded-2xl pl-14 pr-6 py-3 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all shadow-sm" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            <input type="text" placeholder="학생 검색 (이름/학번)" className="w-full bg-white border border-slate-200 rounded-2xl pl-14 pr-6 py-3 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-pink-500/10 transition-all shadow-sm" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); if(statusFilter) setStatusFilter(null); }} />
           </div>
         </div>
 
@@ -307,26 +326,39 @@ const App: React.FC = () => {
         </div>
       </header>
 
+      {/* 오늘의 현황 요약 바 (클릭 필터링 추가) */}
       {activeTab === 'list' && (
         <div className="bg-slate-900 text-white border-b border-white/5">
           <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="hidden sm:flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase tracking-widest mr-2">
-                <Info size={14} /> 오늘의 현황
+                <Info size={14} /> {statusFilter ? '필터링 활성' : '오늘의 현황'}
               </div>
               <div className="flex gap-2.5">
-                <div className="bg-yellow-400 text-slate-950 px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg shadow-yellow-400/10">
+                <button 
+                  onClick={() => setStatusFilter(statusFilter === 'late' ? null : 'late')}
+                  className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all active:scale-95 shadow-lg ${statusFilter === 'late' ? 'bg-yellow-400 text-slate-950 ring-4 ring-yellow-400/20' : 'bg-yellow-400/20 text-yellow-400 hover:bg-yellow-400/30'}`}
+                >
                   <span className="text-[10px] font-black opacity-60 uppercase">지각</span>
                   <span className="text-xs font-black">{currentDayStats.late}</span>
-                </div>
-                <div className="bg-red-500 text-white px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg shadow-red-500/10">
+                </button>
+                <button 
+                  onClick={() => setStatusFilter(statusFilter === 'absent' ? null : 'absent')}
+                  className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all active:scale-95 shadow-lg ${statusFilter === 'absent' ? 'bg-red-500 text-white ring-4 ring-red-500/20' : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'}`}
+                >
                   <span className="text-[10px] font-black opacity-60 uppercase">결석</span>
                   <span className="text-xs font-black">{currentDayStats.absent}</span>
-                </div>
-                <div className="bg-white/10 text-white px-3 py-1.5 rounded-xl flex items-center gap-2 border border-white/10">
+                </button>
+                <button 
+                  onClick={() => setStatusFilter(statusFilter === 'normal' ? null : 'normal')}
+                  className={`px-3 py-1.5 rounded-xl flex items-center gap-2 transition-all active:scale-95 border ${statusFilter === 'normal' ? 'bg-white text-slate-950 ring-4 ring-white/20' : 'bg-white/10 text-white border-white/10 hover:bg-white/20'}`}
+                >
                   <span className="text-[10px] font-black opacity-40 uppercase">정상</span>
                   <span className="text-xs font-black">{currentDayStats.normal}</span>
-                </div>
+                </button>
+                {statusFilter && (
+                  <button onClick={() => setStatusFilter(null)} className="ml-2 text-[10px] font-black text-pink-400 hover:text-pink-300">필터 해제</button>
+                )}
               </div>
             </div>
             <div className="text-[10px] font-black text-slate-500 hidden md:block">
@@ -339,7 +371,8 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-7xl mx-auto px-4 md:px-8 py-8 w-full">
         {activeTab === 'list' && (
           <div className="space-y-8">
-            {!searchQuery && currentYear === null && (
+            {/* 필터가 활성화되어 있지 않고 검색 중이 아닐 때만 학년/반 선택 보임 */}
+            {!searchQuery && !statusFilter && currentYear === null && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-5">
                 {[1, 2, 3].map(year => (
                   <button key={year} onClick={() => setCurrentYear(year)} className="group bg-white border border-slate-200 p-12 rounded-[3rem] transition-all hover:shadow-2xl hover:border-pink-500/50 flex flex-col items-center">
@@ -353,7 +386,7 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {!searchQuery && currentYear !== null && currentClass === null && (
+            {!searchQuery && !statusFilter && currentYear !== null && currentClass === null && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-5">
                 <div className="flex items-center justify-between">
                   <button onClick={() => setCurrentYear(null)} className="flex items-center gap-2 text-slate-500 font-black hover:text-pink-600 transition-colors">
@@ -372,9 +405,9 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {(searchQuery || (currentYear !== null && currentClass !== null)) && (
+            {(searchQuery || statusFilter || (currentYear !== null && currentClass !== null)) && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-5">
-                {!searchQuery && (
+                {!searchQuery && !statusFilter && (
                   <div className="flex items-center justify-between">
                     <button onClick={() => setCurrentClass(null)} className="flex items-center gap-2 text-slate-500 font-black hover:text-pink-600 transition-colors">
                       <ChevronLeft size={20} /> 반 선택으로
@@ -384,9 +417,16 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 )}
-                {searchQuery && (
-                  <div className="flex items-center gap-2 text-slate-400 font-bold mb-4">
-                    <Search size={16} /> '{searchQuery}' 검색 결과 ({filteredStudents.length}명)
+                {(searchQuery || statusFilter) && (
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2 text-slate-400 font-bold">
+                      {searchQuery ? <Search size={16} /> : <Info size={16} />}
+                      {searchQuery ? `'${searchQuery}' 검색 결과` : `${statusFilter === 'late' ? '지각생' : statusFilter === 'absent' ? '결석생' : '정상 출석'} 명단`} 
+                      ({filteredStudents.length}명)
+                    </div>
+                    {statusFilter && !searchQuery && (
+                      <button onClick={resetFilters} className="text-xs font-black text-slate-400 hover:text-pink-500">초기화</button>
+                    )}
                   </div>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
@@ -403,7 +443,8 @@ const App: React.FC = () => {
                   ) : (
                     <div className="col-span-full py-32 text-center text-slate-300">
                        <Search size={48} className="mx-auto mb-4 opacity-10" />
-                       <p className="font-bold">해당 조건에 맞는 학생이 없습니다.</p>
+                       <p className="font-bold">조건에 맞는 학생이 없습니다.</p>
+                       <button onClick={resetFilters} className="mt-4 text-pink-500 font-black text-xs border-b border-pink-500 pb-1">전체 보기로 돌아가기</button>
                     </div>
                   )}
                 </div>
@@ -430,7 +471,7 @@ const App: React.FC = () => {
 
       <footer className="py-10 text-center border-t border-slate-100 bg-white">
         <div className="flex items-center justify-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-widest">
-          <span>석포여중 지각관리시스템 v14.2 (Firebase Realtime)</span>
+          <span>석포여중 지각관리시스템 v14.3 (Filtered Realtime)</span>
         </div>
       </footer>
     </div>
