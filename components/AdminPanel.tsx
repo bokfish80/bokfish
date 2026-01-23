@@ -115,7 +115,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
           <button 
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`flex-1 min-w-[90px] py-3 text-[12px] font-black rounded-2xl flex items-center justify-center gap-2 transition-all ${activeTab === tab.id ? 'bg-white text-pink-600 shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
+            className={`flex-1 min-w-[90px] py-3 text-[12px] font-black rounded-2xl flex items-center justify-center gap-2 transition-all ${activeTab === tab.id ? 'bg-white text-pink-600 shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}
           >
             <tab.icon size={16} /> {tab.label}
           </button>
@@ -141,7 +141,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
         {activeTab === 'violations' && (
           <div className="space-y-6">
             <div className="flex gap-2">
-              <input type="text" value={newViolation} onChange={(e) => setNewViolation(e.target.value)} placeholder="새 위반 항목..." className="flex-1 bg-slate-100 border-none rounded-2xl px-5 py-4 text-sm font-bold" />
+              <input type="text" value={newViolation} onChange={(e) => setNewViolation(e.target.value)} placeholder="새 위반 항목..." className="flex-1 bg-slate-100 border-none rounded-2xl px-5 py-4 text-sm font-bold text-slate-900 placeholder:text-slate-400" />
               <button onClick={() => { if(newViolation){ setViolations([...violations, {id: Date.now().toString(), label: newViolation}]); setNewViolation(''); }}} className="bg-slate-950 text-white px-6 rounded-2xl font-black text-xs">추가</button>
             </div>
             <div className="grid gap-2">
@@ -165,16 +165,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">학년</label>
-                    <select value={singleStudent.year} onChange={e => setSingleStudent({...singleStudent, year: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold">
+                    <label className="text-[10px] font-black text-slate-900 uppercase ml-1">학년</label>
+                    <select value={singleStudent.year} onChange={e => setSingleStudent({...singleStudent, year: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold text-slate-900">
                       <option value="1">1학년</option>
                       <option value="2">2학년</option>
                       <option value="3">3학년</option>
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">반</label>
-                    <select value={singleStudent.classGroup} onChange={e => setSingleStudent({...singleStudent, classGroup: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold">
+                    <label className="text-[10px] font-black text-slate-900 uppercase ml-1">반</label>
+                    <select value={singleStudent.classGroup} onChange={e => setSingleStudent({...singleStudent, classGroup: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold text-slate-900">
                       <option value="1">1반</option>
                       <option value="2">2반</option>
                       <option value="3">3반</option>
@@ -182,12 +182,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">번호</label>
-                    <input type="number" placeholder="번호" value={singleStudent.number} onChange={e => setSingleStudent({...singleStudent, number: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold" />
+                    <label className="text-[10px] font-black text-slate-900 uppercase ml-1">번호</label>
+                    <input type="number" placeholder="번호" value={singleStudent.number} onChange={e => setSingleStudent({...singleStudent, number: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold text-slate-900 placeholder:text-slate-300" />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">이름</label>
-                    <input type="text" placeholder="이름" value={singleStudent.name} onChange={e => setSingleStudent({...singleStudent, name: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold" />
+                    <label className="text-[10px] font-black text-slate-900 uppercase ml-1">이름</label>
+                    <input type="text" placeholder="이름" value={singleStudent.name} onChange={e => setSingleStudent({...singleStudent, name: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold text-slate-900 placeholder:text-slate-300" />
                   </div>
                 </div>
                 <button onClick={handleAddSingleStudent} className="w-full bg-pink-600 text-white py-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-xl hover:bg-pink-700 transition-colors">
@@ -205,7 +205,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
                   value={bulkText} 
                   onChange={(e) => { setBulkText(e.target.value); handleBulkParse(e.target.value); }} 
                   placeholder="학번 이름 (엔터로 구분)&#13;10101 홍길동&#13;10102 김철수" 
-                  className="w-full h-40 bg-white border border-slate-200 rounded-2xl p-4 text-sm font-mono focus:outline-none" 
+                  className="w-full h-40 bg-white border border-slate-200 rounded-2xl p-4 text-sm font-mono text-slate-900 focus:outline-none placeholder:text-slate-300" 
                 />
                 {bulkPreview.length > 0 && (
                   <button onClick={commitBulkUpload} className="w-full bg-slate-950 text-white py-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-xl"><ListPlus size={18} /> {bulkPreview.length}명 한꺼번에 추가</button>
@@ -213,7 +213,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
              </div>
              
              <div className="pt-6 border-t border-slate-100 flex flex-col gap-3">
-               <p className="text-[10px] font-bold text-slate-400 text-center">현재 등록된 학생 수: {students.length}명</p>
+               <p className="text-[10px] font-black text-slate-600 text-center uppercase tracking-widest">현재 등록된 학생 수: {students.length}명</p>
                <button onClick={() => { if(confirm('전체 명단을 삭제하시겠습니까?')){ setStudents([]); } }} className="w-full text-xs font-black text-red-400 py-3 border border-red-100 rounded-xl hover:bg-red-50 transition-colors">명단 전체 초기화</button>
              </div>
           </div>

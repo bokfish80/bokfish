@@ -213,7 +213,7 @@ const App: React.FC = () => {
             <Lock size={48} className="text-pink-500" />
           </div>
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight leading-tight">석포여자중학교<br/><span className="text-pink-500">지각관리시스템</span></h1>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-tight whitespace-nowrap">석포여중 <span className="text-pink-500">지각관리시스템</span></h1>
           </div>
           <div className="bg-slate-900/50 p-10 rounded-[3rem] border border-white/5 space-y-8 shadow-3xl">
             <input 
@@ -268,32 +268,32 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col bg-[#f8fafc]">
       <header className="glass sticky top-0 z-40 border-b border-slate-200/50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 md:px-8 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-4 cursor-pointer" onClick={resetFilters}>
-            <div className="bg-slate-950 p-3 rounded-2xl text-white shadow-xl">
-              <UserCheck className="w-6 h-6" />
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 cursor-pointer overflow-hidden" onClick={resetFilters}>
+            <div className="bg-slate-950 p-2 sm:p-3 rounded-xl sm:rounded-2xl text-white shadow-xl shrink-0">
+              <UserCheck className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
-            <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">석포여중 지각관리시스템</h1>
-              <div className="flex items-center gap-2 mt-1.5">
-                 <span className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-tighter ${syncStatus === 'error' ? 'text-red-500' : 'text-slate-400'}`}>
-                   {syncStatus === 'syncing' ? <RefreshCw size={10} className="animate-spin" /> : <Wifi size={10} />}
-                   {syncStatus === 'error' ? '연결 오류' : `실시간 보호 활성 (${lastSyncTime})`}
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight leading-none whitespace-nowrap overflow-hidden text-ellipsis">석포여중 지각관리시스템</h1>
+              <div className="flex items-center gap-1 mt-1 sm:mt-1.5 overflow-hidden">
+                 <span className={`flex items-center gap-1 text-[9px] sm:text-[10px] font-black uppercase tracking-tighter whitespace-nowrap ${syncStatus === 'error' ? 'text-red-500' : 'text-slate-400'}`}>
+                   {syncStatus === 'syncing' ? <RefreshCw size={9} className="animate-spin" /> : <Wifi size={9} />}
+                   {syncStatus === 'error' ? '오류' : `실시간 보호 (${lastSyncTime})`}
                  </span>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button 
               onClick={() => pushToFirebase(true)} 
               disabled={syncStatus === 'syncing'}
-              className={`flex items-center gap-2 px-5 py-3.5 rounded-2xl font-black text-xs transition-all shadow-sm ${syncStatus === 'syncing' ? 'bg-slate-100 text-slate-400' : 'bg-pink-600 text-white hover:bg-pink-700 active:scale-95'}`}
+              className={`flex items-center gap-2 px-3 sm:px-5 py-2.5 sm:py-3.5 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs transition-all shadow-sm ${syncStatus === 'syncing' ? 'bg-slate-100 text-slate-400' : 'bg-pink-600 text-white hover:bg-pink-700 active:scale-95'}`}
             >
-              <RefreshCw size={16} className={syncStatus === 'syncing' ? 'animate-spin' : ''} />
+              <RefreshCw size={14} className={syncStatus === 'syncing' ? 'animate-spin' : ''} />
               <span className="hidden sm:inline">수동 동기화</span>
             </button>
-            <button onClick={() => { if(confirm('로그아웃 하시겠습니까?')){ localStorage.clear(); location.reload(); } }} className="bg-slate-950 text-white p-3.5 rounded-2xl hover:bg-slate-800 transition-all shadow-sm">
-              <Unlock size={18} />
+            <button onClick={() => { if(confirm('로그아웃 하시겠습니까?')){ localStorage.clear(); location.reload(); } }} className="bg-slate-950 text-white p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl hover:bg-slate-800 transition-all shadow-sm">
+              <Unlock size={14} className="sm:w-[18px] sm:h-[18px]" />
             </button>
           </div>
         </div>
@@ -326,7 +326,6 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* 오늘의 현황 요약 바 (클릭 필터링 추가) */}
       {activeTab === 'list' && (
         <div className="bg-slate-900 text-white border-b border-white/5">
           <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center justify-between">
@@ -371,7 +370,6 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-7xl mx-auto px-4 md:px-8 py-8 w-full">
         {activeTab === 'list' && (
           <div className="space-y-8">
-            {/* 필터가 활성화되어 있지 않고 검색 중이 아닐 때만 학년/반 선택 보임 */}
             {!searchQuery && !statusFilter && currentYear === null && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-5">
                 {[1, 2, 3].map(year => (
@@ -471,7 +469,7 @@ const App: React.FC = () => {
 
       <footer className="py-10 text-center border-t border-slate-100 bg-white">
         <div className="flex items-center justify-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-widest">
-          <span>석포여중 지각관리시스템 v14.3 (Filtered Realtime)</span>
+          <span>석포여중 지각관리시스템 v14.4 (One-line Mobile)</span>
         </div>
       </footer>
     </div>
