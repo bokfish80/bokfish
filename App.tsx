@@ -5,7 +5,7 @@ import { AttendanceState, AttendanceStatus, AttendanceEntry, Student, ViolationO
 import StudentCard from './components/StudentCard';
 import StatsDashboard from './components/StatsDashboard';
 import AdminPanel from './components/AdminPanel';
-import { UserCheck, Wifi, RefreshCw, Save, Unlock, Calendar, Search, LayoutGrid, TrendingUp, ShieldCheck, Lock, ArrowRight, ChevronLeft, GraduationCap, Users, Info, Clock } from 'lucide-react';
+import { UserCheck, Wifi, RefreshCw, Save, Unlock, Calendar, Search, LayoutGrid, TrendingUp, ShieldCheck, Lock, ArrowRight, ChevronLeft, GraduationCap, Users, Info, Clock, DownloadCloud, UploadCloud, CloudSync } from 'lucide-react';
 
 /* ===================== 공통 유틸 ===================== */
 
@@ -22,7 +22,7 @@ const getDeviceId = () => {
 
 const DEVICE_ID = getDeviceId();
 const BUCKET_ID = 'AnV9v8pB3vB6g7r9q8zX1';
-const BASE_KEY = 'seokpo_v12_sync'; // 버전 업그레이드로 인한 키 갱신
+const BASE_KEY = 'seokpo_v13_sync'; // 데이터 무결성을 위해 버전 키 갱신
 
 /* ===================== 타입 ===================== */
 
@@ -35,7 +35,7 @@ interface SyncPayload {
 }
 
 const App: React.FC = () => {
-  const STORAGE = 'sg_v12_';
+  const STORAGE = 'sg_v13_';
 
   const [auth, setAuth] = useState(localStorage.getItem(STORAGE + 'auth') || '');
   const [ready, setReady] = useState(false);
@@ -54,7 +54,7 @@ const App: React.FC = () => {
   const [violations, setViolations] = useState<ViolationOption[]>(DEFAULT_VIOLATIONS);
 
   const lastServerTimestamp = useRef(0);
-  const isPushing = useRef(false);
+  const isSyncing = useRef(false);
   const isDirty = useRef(false);
 
   const syncKey = useMemo(
@@ -62,30 +62,23 @@ const App: React.FC = () => {
     [auth]
   );
 
-  /* ===================== 동기화 로직 강화 ===================== */
+  /* ===================== 핵심 동기화 엔진 ===================== */
 
   const pull = useCallback(async (force = false) => {
-    if (!syncKey || (isPushing.current && !force)) return;
+    if (!syncKey || (isSyncing.current && !force)) return;
 
-    setSyncStatus('syncing');
     try {
       const res = await fetch(`https://kvdb.io/${BUCKET_ID}/${syncKey}`);
-      if (!res.ok) {
-        setSyncStatus('connected');
-        return;
-      }
+      if (!res.ok) return;
 
       const text = await res.text();
-      if (!text || text === "null") {
-        setSyncStatus('connected');
-        return;
-      }
+      if (!text || text === "null") return;
 
       const remote: SyncPayload = JSON.parse(text);
       if (!remote?.timestamp) return;
 
-      // 로컬에 아직 푸시되지 않은 데이터(isDirty)가 있다면, 더 최신인 경우에만 덮어씀
-      if (remote.timestamp > lastServerTimestamp.current && remote.updatedBy !== DEVICE_ID) {
+      // 서버 데이터가 로컬보다 최신인 경우에만 업데이트
+      if (remote.timestamp > lastServerTimestamp.current) {
         setAttendance(remote.attendance || {});
         setStudents(remote.students || []);
         setViolations(remote.violations || DEFAULT_VIOLATIONS);
@@ -93,17 +86,13 @@ const App: React.FC = () => {
       }
       
       setLastSyncTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
-      setSyncStatus('connected');
-    } catch {
-      setSyncStatus('error');
+    } catch (e) {
+      console.error("Pull failed", e);
     }
   }, [syncKey]);
 
-  const push = useCallback(async () => {
-    if (!syncKey || !isDirty.current || isPushing.current) return;
-
-    isPushing.current = true;
-    setSyncStatus('syncing');
+  const push = useCallback(async (force = false) => {
+    if (!syncKey || (!isDirty.current && !force) || isSyncing.current) return;
 
     const newTimestamp = Date.now();
     const payload: SyncPayload = {
@@ -125,18 +114,32 @@ const App: React.FC = () => {
         lastServerTimestamp.current = newTimestamp;
         isDirty.current = false;
         setLastSyncTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
-        setSyncStatus('connected');
-      } else {
-        setSyncStatus('error');
       }
-    } catch {
-      setSyncStatus('error');
-    } finally {
-      isPushing.current = false;
+    } catch (e) {
+      console.error("Push failed", e);
     }
   }, [attendance, students, violations, syncKey]);
 
-  /* ===================== 초기화 및 주기적 실행 ===================== */
+  // 통합 동기화 (Pull -> Push)
+  const manualSync = async () => {
+    if (isSyncing.current) return;
+    setSyncStatus('syncing');
+    isSyncing.current = true;
+
+    try {
+      // 1. 최신 데이터 가져오기
+      await pull(true);
+      // 2. 현재 상태 전송하기
+      await push(true);
+      setSyncStatus('connected');
+    } catch (e) {
+      setSyncStatus('error');
+    } finally {
+      isSyncing.current = false;
+    }
+  };
+
+  /* ===================== 초기화 및 라이프사이클 ===================== */
 
   useEffect(() => {
     if (auth !== '1111') return;
@@ -152,15 +155,17 @@ const App: React.FC = () => {
       setStudents(generateInitialStudents());
     }
 
-    pull(true).finally(() => setReady(true));
-  }, [auth, pull]);
+    manualSync().finally(() => setReady(true));
+  }, [auth]);
 
+  // 15초마다 자동 Pull (데이터 백그라운드 갱신)
   useEffect(() => {
     if (!ready) return;
-    const timer = setInterval(() => pull(), 5000);
+    const timer = setInterval(() => pull(), 15000);
     return () => clearInterval(timer);
   }, [ready, pull]);
 
+  // 데이터 변경 시 로컬 저장 및 3초 뒤 자동 Push 시도
   useEffect(() => {
     if (!ready) return;
 
@@ -176,7 +181,7 @@ const App: React.FC = () => {
       })
     );
 
-    const t = setTimeout(push, 1000); // 1초 뒤 푸시 시도 (더 빠른 반영)
+    const t = setTimeout(() => push(), 3000);
     return () => clearTimeout(t);
   }, [attendance, students, violations, ready, push]);
 
@@ -195,7 +200,6 @@ const App: React.FC = () => {
 
   const currentDayStats = useMemo(() => {
     const dayRecords = attendance[selectedDate] || {};
-    // Add type cast to solve the error regarding property 'type' not existing on unknown
     const records = Object.values(dayRecords) as AttendanceEntry[];
     const late = records.filter(r => r.type === 'late').length;
     const absent = records.filter(r => r.type === 'absent').length;
@@ -203,7 +207,7 @@ const App: React.FC = () => {
     return { late, absent, normal: total - (late + absent), total };
   }, [attendance, selectedDate, students]);
 
-  /* ===================== 로그인 UI ===================== */
+  /* ===================== 화면 렌더링 ===================== */
 
   if (auth !== '1111') {
     return (
@@ -259,12 +263,10 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
         <RefreshCw size={48} className="text-pink-500 animate-spin mb-6" />
-        <h2 className="text-2xl font-black text-white">데이터 동기화 중...</h2>
+        <h2 className="text-2xl font-black text-white">시스템 초기화 중...</h2>
       </div>
     );
   }
-
-  /* ===================== UI 필터링 ===================== */
 
   const filteredStudents = students.filter(s => {
     const matchesSearch = s.name.includes(searchQuery) || s.studentNumber.includes(searchQuery);
@@ -285,14 +287,19 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2 mt-1.5">
                  <span className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-tighter ${syncStatus === 'error' ? 'text-red-500' : 'text-slate-400'}`}>
                    {syncStatus === 'syncing' ? <RefreshCw size={10} className="animate-spin" /> : <Wifi size={10} />}
-                   {syncStatus === 'error' ? '연결 오류' : `동기화 활성 (${lastSyncTime})`}
+                   {syncStatus === 'error' ? '연결 오류' : `최근 동기화: ${lastSyncTime}`}
                  </span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => { isDirty.current = true; push(); }} className={`p-3.5 rounded-2xl transition-all shadow-sm ${isDirty.current ? 'bg-pink-600 text-white animate-pulse' : 'bg-white border border-slate-200 text-slate-400'}`} title="지금 저장">
-              <Save size={18} />
+            <button 
+              onClick={manualSync} 
+              disabled={syncStatus === 'syncing'}
+              className={`flex items-center gap-2 px-5 py-3.5 rounded-2xl font-black text-xs transition-all shadow-sm ${syncStatus === 'syncing' ? 'bg-slate-100 text-slate-400' : 'bg-pink-600 text-white hover:bg-pink-700 active:scale-95'}`}
+            >
+              <RefreshCw size={16} className={syncStatus === 'syncing' ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">지금 동기화</span>
             </button>
             <button onClick={() => { if(confirm('로그아웃 하시겠습니까?')){ localStorage.clear(); location.reload(); } }} className="bg-slate-950 text-white p-3.5 rounded-2xl hover:bg-slate-800 transition-all shadow-sm">
               <Unlock size={18} />
@@ -452,7 +459,7 @@ const App: React.FC = () => {
 
       <footer className="py-10 text-center border-t border-slate-100 bg-white">
         <div className="flex items-center justify-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-widest">
-          <span>석포여중 지각관리시스템 v12.0</span>
+          <span>석포여중 지각관리시스템 v13.0</span>
         </div>
       </footer>
     </div>
