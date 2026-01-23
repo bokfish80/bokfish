@@ -5,11 +5,23 @@ import { AttendanceState, AttendanceStatus, AttendanceEntry, Student, ViolationO
 import StudentCard from './components/StudentCard';
 import StatsDashboard from './components/StatsDashboard';
 import AdminPanel from './components/AdminPanel';
-import { UserCheck, Wifi, RefreshCw, Save, Unlock, Calendar, Search, LayoutGrid, TrendingUp, ShieldCheck, Lock, ArrowRight, ChevronLeft, GraduationCap, Users, Info, Clock, DownloadCloud, UploadCloud, CloudSync } from 'lucide-react';
+import { UserCheck, Wifi, RefreshCw, Save, Unlock, Calendar, Search, LayoutGrid, TrendingUp, ShieldCheck, Lock, ArrowRight, ChevronLeft, GraduationCap, Users, Info, Clock } from 'lucide-react';
 
-/* ===================== 공통 유틸 ===================== */
+// Firebase SDK Imports
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, onValue, set } from 'firebase/database';
 
-const getLocalDate = () => new Date().toLocaleDateString('en-CA');
+/* ===================== Firebase 설정 ===================== */
+
+const FIREBASE_CONFIG = {
+  apiKey: "YAIzaSyDO9G1oy59a1aY1sMDoML3kVKSu9moaj0w",
+  authDomain: "bokfish-late.firebaseapp.com",
+  databaseURL: "https://bokfish-late-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "bokfish-late",
+  storageBucket: "bokfish-late.firebasestorage.app",
+  messagingSenderId: "1071759128179",
+  appId: "1:1071759128179:web:1cc1056250a08bf8eedc06"
+};
 
 const getDeviceId = () => {
   let id = localStorage.getItem('seokpo_device_id');
@@ -21,8 +33,7 @@ const getDeviceId = () => {
 };
 
 const DEVICE_ID = getDeviceId();
-const BUCKET_ID = 'AnV9v8pB3vB6g7r9q8zX1';
-const BASE_KEY = 'seokpo_v13_sync'; // 데이터 무결성을 위해 버전 키 갱신
+const getLocalDate = () => new Date().toLocaleDateString('en-CA');
 
 /* ===================== 타입 ===================== */
 
@@ -35,7 +46,7 @@ interface SyncPayload {
 }
 
 const App: React.FC = () => {
-  const STORAGE = 'sg_v13_';
+  const STORAGE = 'sg_fb_v1_';
 
   const [auth, setAuth] = useState(localStorage.getItem(STORAGE + 'auth') || '');
   const [ready, setReady] = useState(false);
@@ -54,46 +65,64 @@ const App: React.FC = () => {
   const [violations, setViolations] = useState<ViolationOption[]>(DEFAULT_VIOLATIONS);
 
   const lastServerTimestamp = useRef(0);
-  const isSyncing = useRef(false);
-  const isDirty = useRef(false);
+  const isLocalChange = useRef(false);
 
-  const syncKey = useMemo(
-    () => (auth === '1111' ? `${BASE_KEY}_${auth}` : ''),
-    [auth]
-  );
+  // Firebase Ref
+  const db = useMemo(() => {
+    if (auth === '1111') {
+      try {
+        const app = initializeApp(FIREBASE_CONFIG);
+        return getDatabase(app);
+      } catch (e) {
+        console.error("Firebase Init Error", e);
+        return null;
+      }
+    }
+    return null;
+  }, [auth]);
 
-  /* ===================== 핵심 동기화 엔진 ===================== */
+  const dataRef = useMemo(() => db ? ref(db, 'seokpo_data') : null, [db]);
 
-  const pull = useCallback(async (force = false) => {
-    if (!syncKey || (isSyncing.current && !force)) return;
+  /* ===================== Firebase 실시간 동기화 로직 ===================== */
 
-    try {
-      const res = await fetch(`https://kvdb.io/${BUCKET_ID}/${syncKey}`);
-      if (!res.ok) return;
+  // 1. 데이터 수신 (Listening)
+  useEffect(() => {
+    if (!dataRef || !auth) return;
 
-      const text = await res.text();
-      if (!text || text === "null") return;
-
-      const remote: SyncPayload = JSON.parse(text);
-      if (!remote?.timestamp) return;
-
-      // 서버 데이터가 로컬보다 최신인 경우에만 업데이트
-      if (remote.timestamp > lastServerTimestamp.current) {
-        setAttendance(remote.attendance || {});
-        setStudents(remote.students || []);
-        setViolations(remote.violations || DEFAULT_VIOLATIONS);
-        lastServerTimestamp.current = remote.timestamp;
+    setSyncStatus('syncing');
+    const unsubscribe = onValue(dataRef, (snapshot) => {
+      const data = snapshot.val() as SyncPayload;
+      if (data) {
+        // 서버의 타임스탬프가 내가 마지막으로 보낸/받은 것보다 최신일 때만 업데이트
+        if (data.timestamp > lastServerTimestamp.current && data.updatedBy !== DEVICE_ID) {
+          isLocalChange.current = false; // 리모트 업데이트임을 명시
+          setAttendance(data.attendance || {});
+          setStudents(data.students || []);
+          setViolations(data.violations || DEFAULT_VIOLATIONS);
+          lastServerTimestamp.current = data.timestamp;
+        }
+      } else if (!ready) {
+        // 데이터가 전혀 없는 경우 초기화
+        setStudents(generateInitialStudents());
+        isLocalChange.current = true;
       }
       
       setLastSyncTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
-    } catch (e) {
-      console.error("Pull failed", e);
-    }
-  }, [syncKey]);
+      setSyncStatus('connected');
+      if (!ready) setReady(true);
+    }, (error) => {
+      console.error(error);
+      setSyncStatus('error');
+    });
 
-  const push = useCallback(async (force = false) => {
-    if (!syncKey || (!isDirty.current && !force) || isSyncing.current) return;
+    return () => unsubscribe();
+  }, [dataRef, auth, ready]);
 
+  // 2. 데이터 전송 (Push)
+  const pushToFirebase = useCallback(async (force = false) => {
+    if (!dataRef || !ready || (!isLocalChange.current && !force)) return;
+
+    setSyncStatus('syncing');
     const newTimestamp = Date.now();
     const payload: SyncPayload = {
       attendance,
@@ -104,90 +133,32 @@ const App: React.FC = () => {
     };
 
     try {
-      const res = await fetch(`https://kvdb.io/${BUCKET_ID}/${syncKey}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (res.ok) {
-        lastServerTimestamp.current = newTimestamp;
-        isDirty.current = false;
-        setLastSyncTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
-      }
-    } catch (e) {
-      console.error("Push failed", e);
-    }
-  }, [attendance, students, violations, syncKey]);
-
-  // 통합 동기화 (Pull -> Push)
-  const manualSync = async () => {
-    if (isSyncing.current) return;
-    setSyncStatus('syncing');
-    isSyncing.current = true;
-
-    try {
-      // 1. 최신 데이터 가져오기
-      await pull(true);
-      // 2. 현재 상태 전송하기
-      await push(true);
+      await set(dataRef, payload);
+      lastServerTimestamp.current = newTimestamp;
+      isLocalChange.current = false;
       setSyncStatus('connected');
+      setLastSyncTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
     } catch (e) {
+      console.error(e);
       setSyncStatus('error');
-    } finally {
-      isSyncing.current = false;
     }
-  };
+  }, [attendance, students, violations, dataRef, ready]);
 
-  /* ===================== 초기화 및 라이프사이클 ===================== */
-
+  // 자동 푸시 (사용자가 데이터를 바꾼 경우에만 실행)
   useEffect(() => {
-    if (auth !== '1111') return;
+    if (!ready || !isLocalChange.current) return;
+    
+    const t = setTimeout(() => {
+      pushToFirebase();
+    }, 1000);
 
-    const local = localStorage.getItem(STORAGE + 'data');
-    if (local) {
-      const parsed: SyncPayload = JSON.parse(local);
-      setAttendance(parsed.attendance || {});
-      setStudents(parsed.students || generateInitialStudents());
-      setViolations(parsed.violations || DEFAULT_VIOLATIONS);
-      lastServerTimestamp.current = parsed.timestamp || 0;
-    } else {
-      setStudents(generateInitialStudents());
-    }
-
-    manualSync().finally(() => setReady(true));
-  }, [auth]);
-
-  // 15초마다 자동 Pull (데이터 백그라운드 갱신)
-  useEffect(() => {
-    if (!ready) return;
-    const timer = setInterval(() => pull(), 15000);
-    return () => clearInterval(timer);
-  }, [ready, pull]);
-
-  // 데이터 변경 시 로컬 저장 및 3초 뒤 자동 Push 시도
-  useEffect(() => {
-    if (!ready) return;
-
-    isDirty.current = true;
-    localStorage.setItem(
-      STORAGE + 'data',
-      JSON.stringify({
-        attendance,
-        students,
-        violations,
-        timestamp: lastServerTimestamp.current,
-        updatedBy: DEVICE_ID,
-      })
-    );
-
-    const t = setTimeout(() => push(), 3000);
     return () => clearTimeout(t);
-  }, [attendance, students, violations, ready, push]);
+  }, [attendance, students, violations, ready, pushToFirebase]);
 
   /* ===================== 출결 업데이트 ===================== */
 
   const updateStatus = (status: AttendanceStatus | null, studentId: string, options?: Partial<AttendanceEntry>) => {
+    isLocalChange.current = true; // 로컬에서 변경됨을 표시
     setAttendance(prev => {
       const day = { ...(prev[selectedDate] || {}) };
       if (status === null) delete day[studentId];
@@ -207,7 +178,7 @@ const App: React.FC = () => {
     return { late, absent, normal: total - (late + absent), total };
   }, [attendance, selectedDate, students]);
 
-  /* ===================== 화면 렌더링 ===================== */
+  /* ===================== UI 렌더링 ===================== */
 
   if (auth !== '1111') {
     return (
@@ -259,11 +230,12 @@ const App: React.FC = () => {
     );
   }
 
-  if (!ready) {
+  if (!ready && auth === '1111') {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
         <RefreshCw size={48} className="text-pink-500 animate-spin mb-6" />
-        <h2 className="text-2xl font-black text-white">시스템 초기화 중...</h2>
+        <h2 className="text-2xl font-black text-white">데이터 동기화 중...</h2>
+        <p className="text-slate-500 text-sm mt-2">Firebase 실시간 엔진에 연결하고 있습니다.</p>
       </div>
     );
   }
@@ -287,19 +259,19 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2 mt-1.5">
                  <span className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-tighter ${syncStatus === 'error' ? 'text-red-500' : 'text-slate-400'}`}>
                    {syncStatus === 'syncing' ? <RefreshCw size={10} className="animate-spin" /> : <Wifi size={10} />}
-                   {syncStatus === 'error' ? '연결 오류' : `최근 동기화: ${lastSyncTime}`}
+                   {syncStatus === 'error' ? '연결 오류' : `실시간 보호 활성 (${lastSyncTime})`}
                  </span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button 
-              onClick={manualSync} 
+              onClick={() => pushToFirebase(true)} 
               disabled={syncStatus === 'syncing'}
               className={`flex items-center gap-2 px-5 py-3.5 rounded-2xl font-black text-xs transition-all shadow-sm ${syncStatus === 'syncing' ? 'bg-slate-100 text-slate-400' : 'bg-pink-600 text-white hover:bg-pink-700 active:scale-95'}`}
             >
               <RefreshCw size={16} className={syncStatus === 'syncing' ? 'animate-spin' : ''} />
-              <span className="hidden sm:inline">지금 동기화</span>
+              <span className="hidden sm:inline">수동 동기화</span>
             </button>
             <button onClick={() => { if(confirm('로그아웃 하시겠습니까?')){ localStorage.clear(); location.reload(); } }} className="bg-slate-950 text-white p-3.5 rounded-2xl hover:bg-slate-800 transition-all shadow-sm">
               <Unlock size={18} />
@@ -335,7 +307,6 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* 오늘의 현황 요약 바 */}
       {activeTab === 'list' && (
         <div className="bg-slate-900 text-white border-b border-white/5">
           <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center justify-between">
@@ -446,12 +417,12 @@ const App: React.FC = () => {
         {activeTab === 'admin' && (
           <AdminPanel
             students={students}
-            setStudents={setStudents}
+            setStudents={(stds) => { isLocalChange.current = true; setStudents(stds); }}
             violations={violations}
-            setViolations={setViolations}
+            setViolations={(viols) => { isLocalChange.current = true; setViolations(viols); }}
             attendance={attendance}
             selectedDate={selectedDate}
-            syncKey={syncKey}
+            syncKey={"firebase_v1"}
             onClose={() => setActiveTab('list')}
           />
         )}
@@ -459,7 +430,7 @@ const App: React.FC = () => {
 
       <footer className="py-10 text-center border-t border-slate-100 bg-white">
         <div className="flex items-center justify-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-widest">
-          <span>석포여중 지각관리시스템 v13.0</span>
+          <span>석포여중 지각관리시스템 v14.2 (Firebase Realtime)</span>
         </div>
       </footer>
     </div>
