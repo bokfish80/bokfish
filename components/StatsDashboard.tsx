@@ -45,7 +45,9 @@ const StatsDashboard: React.FC<StatsDashboardProps> = ({ attendance, students })
       const dayRecords = attendance[date];
       let dayLate = 0, dayAbsent = 0, dayViolation = 0;
 
-      Object.entries(dayRecords).forEach(([studentId, entry]) => {
+      // Cast entry as AttendanceEntry to fix type errors
+      Object.entries(dayRecords).forEach(([studentId, entryVal]) => {
+        const entry = entryVal as AttendanceEntry;
         const student = students.find(s => s.id === studentId);
         if (!student) return;
 

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Student, ViolationOption, AttendanceState } from '../types';
 import AiInsights from './AiInsights';
-import { Settings, UserPlus, Trash2, ShieldCheck, X, Cloud, Share2, Copy, FileSpreadsheet, ListPlus, Sparkles } from 'lucide-react';
+import { Settings, UserPlus, Trash2, ShieldCheck, X, Cloud, Share2, Copy, FileSpreadsheet, ListPlus, Sparkles, User, Plus } from 'lucide-react';
 
 interface AdminPanelProps {
   students: Student[];
@@ -20,6 +20,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
   const [newViolation, setNewViolation] = useState('');
   const [bulkText, setBulkText] = useState('');
   const [bulkPreview, setBulkPreview] = useState<Student[]>([]);
+
+  // 개별 등록 상태
+  const [singleStudent, setSingleStudent] = useState({
+    year: '1',
+    classGroup: '1',
+    number: '',
+    name: ''
+  });
 
   const shareUrl = window.location.origin + window.location.pathname;
 
@@ -55,6 +63,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
       setBulkPreview([]);
       alert('학생 등록이 완료되었습니다.');
     }
+  };
+
+  const handleAddSingleStudent = () => {
+    const { year, classGroup, number, name } = singleStudent;
+    if (!number || !name) {
+      alert('학번과 이름을 모두 입력해주세요.');
+      return;
+    }
+
+    const fullStudentNumber = `${year}${classGroup}${number.padStart(2, '0')}`;
+    
+    // 중복 체크
+    if (students.some(s => s.studentNumber === fullStudentNumber)) {
+      alert('이미 존재하는 학번입니다.');
+      return;
+    }
+
+    const newStd: Student = {
+      id: `std-${fullStudentNumber}-${Date.now()}`,
+      name: name,
+      studentNumber: fullStudentNumber,
+      year: parseInt(year),
+      classGroup: parseInt(classGroup)
+    };
+
+    setStudents([...students, newStd]);
+    setSingleStudent({ ...singleStudent, number: '', name: '' });
+    alert(`${name} 학생이 등록되었습니다.`);
   };
 
   return (
@@ -120,7 +156,46 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
         )}
 
         {activeTab === 'students' && (
-          <div className="space-y-8">
+          <div className="space-y-8 pb-10">
+             {/* 학생 개별 등록 */}
+             <div className="bg-white border-2 border-slate-100 p-6 rounded-[2rem] space-y-4 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <User size={24} className="text-pink-500" />
+                  <h4 className="font-black text-slate-900">학생 개별 등록</h4>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">학년</label>
+                    <select value={singleStudent.year} onChange={e => setSingleStudent({...singleStudent, year: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold">
+                      <option value="1">1학년</option>
+                      <option value="2">2학년</option>
+                      <option value="3">3학년</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">반</label>
+                    <select value={singleStudent.classGroup} onChange={e => setSingleStudent({...singleStudent, classGroup: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold">
+                      <option value="1">1반</option>
+                      <option value="2">2반</option>
+                      <option value="3">3반</option>
+                      <option value="4">4반</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">번호</label>
+                    <input type="number" placeholder="번호" value={singleStudent.number} onChange={e => setSingleStudent({...singleStudent, number: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">이름</label>
+                    <input type="text" placeholder="이름" value={singleStudent.name} onChange={e => setSingleStudent({...singleStudent, name: e.target.value})} className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm font-bold" />
+                  </div>
+                </div>
+                <button onClick={handleAddSingleStudent} className="w-full bg-pink-600 text-white py-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-xl hover:bg-pink-700 transition-colors">
+                  <Plus size={18} /> 학생 추가하기
+                </button>
+             </div>
+
+             {/* 학생 일괄 등록 */}
              <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-200 space-y-4">
                 <div className="flex items-center gap-3">
                   <FileSpreadsheet size={24} className="text-pink-500" />
@@ -129,14 +204,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ students, setStudents, violatio
                 <textarea 
                   value={bulkText} 
                   onChange={(e) => { setBulkText(e.target.value); handleBulkParse(e.target.value); }} 
-                  placeholder="학번 이름&#13;10101 홍길동" 
+                  placeholder="학번 이름 (엔터로 구분)&#13;10101 홍길동&#13;10102 김철수" 
                   className="w-full h-40 bg-white border border-slate-200 rounded-2xl p-4 text-sm font-mono focus:outline-none" 
                 />
                 {bulkPreview.length > 0 && (
-                  <button onClick={commitBulkUpload} className="w-full bg-slate-950 text-white py-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-xl"><ListPlus size={18} /> {bulkPreview.length}명 명단에 추가</button>
+                  <button onClick={commitBulkUpload} className="w-full bg-slate-950 text-white py-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-xl"><ListPlus size={18} /> {bulkPreview.length}명 한꺼번에 추가</button>
                 )}
              </div>
-             <button onClick={() => { if(confirm('전체 명단을 삭제하시겠습니까?')){ setStudents([]); } }} className="w-full text-xs font-black text-red-400 py-3 border border-red-100 rounded-xl hover:bg-red-50 transition-colors">명단 전체 초기화</button>
+             
+             <div className="pt-6 border-t border-slate-100 flex flex-col gap-3">
+               <p className="text-[10px] font-bold text-slate-400 text-center">현재 등록된 학생 수: {students.length}명</p>
+               <button onClick={() => { if(confirm('전체 명단을 삭제하시겠습니까?')){ setStudents([]); } }} className="w-full text-xs font-black text-red-400 py-3 border border-red-100 rounded-xl hover:bg-red-50 transition-colors">명단 전체 초기화</button>
+             </div>
           </div>
         )}
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { AttendanceState, Student } from '../types';
+import { AttendanceState, Student, AttendanceEntry } from '../types';
 import { Sparkles, RefreshCw, AlertTriangle, MessageCircle, TrendingUp } from 'lucide-react';
 
 interface AiInsightsProps {
@@ -30,21 +30,24 @@ const AiInsights: React.FC<AiInsightsProps> = ({ attendance, students, selectedD
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const currentDay = attendance[selectedDate] || {};
       
+      // Cast entry to AttendanceEntry for all filter/map operations
       const lateList = Object.entries(currentDay)
-        .filter(([_, entry]) => entry.type === 'late')
-        .map(([id, entry]) => {
+        .filter(([_, entry]) => (entry as AttendanceEntry).type === 'late')
+        .map(([id, entryAny]) => {
+          const entry = entryAny as AttendanceEntry;
           const s = students.find(std => std.id === id);
           return `${s?.name}(${entry.time || '시간미정'})`;
         });
       
       const absentList = Object.entries(currentDay)
-        .filter(([_, entry]) => entry.type === 'absent')
+        .filter(([_, entry]) => (entry as AttendanceEntry).type === 'absent')
         .map(([id]) => students.find(std => std.id === id)?.name)
         .filter(Boolean);
 
       const violationList = Object.entries(currentDay)
-        .filter(([_, entry]) => entry.type === 'violation')
-        .map(([id, entry]) => {
+        .filter(([_, entry]) => (entry as AttendanceEntry).type === 'violation')
+        .map(([id, entryAny]) => {
+          const entry = entryAny as AttendanceEntry;
           const s = students.find(std => std.id === id);
           return `${s?.name}(${entry.violationType || '기타 위반'})`;
         });

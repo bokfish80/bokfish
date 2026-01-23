@@ -5,7 +5,7 @@ import { AttendanceState, AttendanceStatus, AttendanceEntry, Student, ViolationO
 import StudentCard from './components/StudentCard';
 import StatsDashboard from './components/StatsDashboard';
 import AdminPanel from './components/AdminPanel';
-import { UserCheck, Wifi, RefreshCw, Save, Unlock, Calendar, Search, LayoutGrid, TrendingUp, ShieldCheck, Lock, ArrowRight, ChevronLeft, GraduationCap, Users, Info } from 'lucide-react';
+import { UserCheck, Wifi, RefreshCw, Save, Unlock, Calendar, Search, LayoutGrid, TrendingUp, ShieldCheck, Lock, ArrowRight, ChevronLeft, GraduationCap, Users, Info, Clock } from 'lucide-react';
 
 /* ===================== 공통 유틸 ===================== */
 
@@ -22,7 +22,7 @@ const getDeviceId = () => {
 
 const DEVICE_ID = getDeviceId();
 const BUCKET_ID = 'AnV9v8pB3vB6g7r9q8zX1';
-const BASE_KEY = 'seokpo_v11_sync';
+const BASE_KEY = 'seokpo_v12_sync'; // 버전 업그레이드로 인한 키 갱신
 
 /* ===================== 타입 ===================== */
 
@@ -35,11 +35,12 @@ interface SyncPayload {
 }
 
 const App: React.FC = () => {
-  const STORAGE = 'sg_v11_';
+  const STORAGE = 'sg_v12_';
 
   const [auth, setAuth] = useState(localStorage.getItem(STORAGE + 'auth') || '');
   const [ready, setReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'connected' | 'error'>('idle');
+  const [lastSyncTime, setLastSyncTime] = useState<string>('-');
 
   const [selectedDate, setSelectedDate] = useState(getLocalDate());
   const [activeTab, setActiveTab] = useState<'list' | 'stats' | 'admin'>('list');
@@ -61,10 +62,10 @@ const App: React.FC = () => {
     [auth]
   );
 
-  /* ===================== 동기화 ===================== */
+  /* ===================== 동기화 로직 강화 ===================== */
 
-  const pull = useCallback(async () => {
-    if (!syncKey || isPushing.current) return;
+  const pull = useCallback(async (force = false) => {
+    if (!syncKey || (isPushing.current && !force)) return;
 
     setSyncStatus('syncing');
     try {
@@ -83,23 +84,15 @@ const App: React.FC = () => {
       const remote: SyncPayload = JSON.parse(text);
       if (!remote?.timestamp) return;
 
-      if (remote.timestamp <= lastServerTimestamp.current) {
-        setSyncStatus('connected');
-        return;
+      // 로컬에 아직 푸시되지 않은 데이터(isDirty)가 있다면, 더 최신인 경우에만 덮어씀
+      if (remote.timestamp > lastServerTimestamp.current && remote.updatedBy !== DEVICE_ID) {
+        setAttendance(remote.attendance || {});
+        setStudents(remote.students || []);
+        setViolations(remote.violations || DEFAULT_VIOLATIONS);
+        lastServerTimestamp.current = remote.timestamp;
       }
       
-      if (remote.updatedBy === DEVICE_ID) {
-        lastServerTimestamp.current = remote.timestamp;
-        setSyncStatus('connected');
-        return;
-      }
-
-      setAttendance(remote.attendance || {});
-      setStudents(remote.students || []);
-      setViolations(remote.violations || DEFAULT_VIOLATIONS);
-
-      lastServerTimestamp.current = remote.timestamp;
-      isDirty.current = false;
+      setLastSyncTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
       setSyncStatus('connected');
     } catch {
       setSyncStatus('error');
@@ -112,24 +105,30 @@ const App: React.FC = () => {
     isPushing.current = true;
     setSyncStatus('syncing');
 
+    const newTimestamp = Date.now();
     const payload: SyncPayload = {
       attendance,
       students,
       violations,
-      timestamp: Date.now(),
+      timestamp: newTimestamp,
       updatedBy: DEVICE_ID,
     };
 
     try {
-      await fetch(`https://kvdb.io/${BUCKET_ID}/${syncKey}`, {
+      const res = await fetch(`https://kvdb.io/${BUCKET_ID}/${syncKey}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
         headers: { 'Content-Type': 'application/json' },
       });
 
-      lastServerTimestamp.current = payload.timestamp;
-      isDirty.current = false;
-      setSyncStatus('connected');
+      if (res.ok) {
+        lastServerTimestamp.current = newTimestamp;
+        isDirty.current = false;
+        setLastSyncTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
+        setSyncStatus('connected');
+      } else {
+        setSyncStatus('error');
+      }
     } catch {
       setSyncStatus('error');
     } finally {
@@ -137,7 +136,7 @@ const App: React.FC = () => {
     }
   }, [attendance, students, violations, syncKey]);
 
-  /* ===================== 초기화 ===================== */
+  /* ===================== 초기화 및 주기적 실행 ===================== */
 
   useEffect(() => {
     if (auth !== '1111') return;
@@ -153,13 +152,12 @@ const App: React.FC = () => {
       setStudents(generateInitialStudents());
     }
 
-    pull().finally(() => setReady(true));
+    pull(true).finally(() => setReady(true));
   }, [auth, pull]);
 
   useEffect(() => {
     if (!ready) return;
-
-    const timer = setInterval(pull, 5000);
+    const timer = setInterval(() => pull(), 5000);
     return () => clearInterval(timer);
   }, [ready, pull]);
 
@@ -178,7 +176,7 @@ const App: React.FC = () => {
       })
     );
 
-    const t = setTimeout(push, 2000);
+    const t = setTimeout(push, 1000); // 1초 뒤 푸시 시도 (더 빠른 반영)
     return () => clearTimeout(t);
   }, [attendance, students, violations, ready, push]);
 
@@ -197,7 +195,8 @@ const App: React.FC = () => {
 
   const currentDayStats = useMemo(() => {
     const dayRecords = attendance[selectedDate] || {};
-    const records = Object.values(dayRecords);
+    // Add type cast to solve the error regarding property 'type' not existing on unknown
+    const records = Object.values(dayRecords) as AttendanceEntry[];
     const late = records.filter(r => r.type === 'late').length;
     const absent = records.filter(r => r.type === 'absent').length;
     const total = students.length;
@@ -282,17 +281,17 @@ const App: React.FC = () => {
               <UserCheck className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">석포여중 지각관리</h1>
+              <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">석포여중 지각관리시스템</h1>
               <div className="flex items-center gap-2 mt-1.5">
                  <span className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-tighter ${syncStatus === 'error' ? 'text-red-500' : 'text-slate-400'}`}>
                    {syncStatus === 'syncing' ? <RefreshCw size={10} className="animate-spin" /> : <Wifi size={10} />}
-                   {syncStatus === 'error' ? '연결 오류' : '동기화 활성'}
+                   {syncStatus === 'error' ? '연결 오류' : `동기화 활성 (${lastSyncTime})`}
                  </span>
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => push()} className={`p-3.5 rounded-2xl transition-all shadow-sm ${isDirty.current ? 'bg-pink-600 text-white' : 'bg-white border border-slate-200 text-slate-400'}`} title="지금 저장">
+            <button onClick={() => { isDirty.current = true; push(); }} className={`p-3.5 rounded-2xl transition-all shadow-sm ${isDirty.current ? 'bg-pink-600 text-white animate-pulse' : 'bg-white border border-slate-200 text-slate-400'}`} title="지금 저장">
               <Save size={18} />
             </button>
             <button onClick={() => { if(confirm('로그아웃 하시겠습니까?')){ localStorage.clear(); location.reload(); } }} className="bg-slate-950 text-white p-3.5 rounded-2xl hover:bg-slate-800 transition-all shadow-sm">
@@ -329,7 +328,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* 오늘의 현황 요약 바 (학생 현황 탭일 때만 표시) */}
+      {/* 오늘의 현황 요약 바 */}
       {activeTab === 'list' && (
         <div className="bg-slate-900 text-white border-b border-white/5">
           <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center justify-between">
@@ -362,7 +361,6 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-7xl mx-auto px-4 md:px-8 py-8 w-full">
         {activeTab === 'list' && (
           <div className="space-y-8">
-            {/* 검색어가 없고 학년이 선택되지 않았을 때: 학년 선택 화면 */}
             {!searchQuery && currentYear === null && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-5">
                 {[1, 2, 3].map(year => (
@@ -377,7 +375,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* 검색어가 없고 학년은 선택되었으나 반이 선택되지 않았을 때: 반 선택 화면 */}
             {!searchQuery && currentYear !== null && currentClass === null && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-5">
                 <div className="flex items-center justify-between">
@@ -397,7 +394,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* 학생 목록 표시 (검색 중이거나 학년/반이 모두 선택되었을 때) */}
             {(searchQuery || (currentYear !== null && currentClass !== null)) && (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-5">
                 {!searchQuery && (
@@ -456,7 +452,7 @@ const App: React.FC = () => {
 
       <footer className="py-10 text-center border-t border-slate-100 bg-white">
         <div className="flex items-center justify-center gap-2 text-[11px] font-black text-slate-400 uppercase tracking-widest">
-          <span>석포여중 지각관리시스템 v11.0</span>
+          <span>석포여중 지각관리시스템 v12.0</span>
         </div>
       </footer>
     </div>
